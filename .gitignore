@@ -52,7 +52,7 @@ log_files/
 *.mp4
 *.csv
 *.json
-*.txt
+# Note: requirements.txt is intentionally not ignored
 
 # Temporary files
 *.tmp
