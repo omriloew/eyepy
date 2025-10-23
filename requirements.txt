@@ -1,11 +1,15 @@
-psychopy>=2024.2.0
-numpy>=1.21.0
-pandas>=1.3.0
-matplotlib>=3.5.0
-scipy>=1.7.0
+# Core packages that work reliably
+numpy>=2.0.0
+pandas>=2.3.0
+matplotlib>=3.9.0
+scipy>=1.13.0
 pyserial>=3.5
-screeninfo>=0.8.0
-pynput>=1.7.0
-opencv-python>=4.5.0
+pynput>=1.8.0
+opencv-python>=4.12.0
+psychopy>=2025.1.0
+pylink>=0.3.0
 scikit-learn>=1.0.0
-seaborn>=0.11.0
+
+# Optional packages (install if needed)
+# screeninfo>=0.8.0
+# seaborn>=0.11.0
