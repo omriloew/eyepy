@@ -69,7 +69,7 @@ main_demo_trails_number = 2
 # VAS (Visual Analog Scale) parameters
 # ==============================================
 vas_show_value = True  # Show the current numeric value while choosing
-vas_max = 10  # Maximum value on the scale
+vas_max = 100  # Maximum value on the scale
 vas_min = 0  # Minimum value on the scale
 vas_granularity = 1  # Step size for the scale
 vas_keyboard_step = 1  # How much to jump when using arrow keys

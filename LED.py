@@ -22,6 +22,7 @@ class LED:
 
     def flash(self):
         if not config.led_on:
+            core.wait(self.on_duration_in_sec)
             return
         ser = serial.Serial(self.port_name, self.baud_rate, timeout=self.timeout)
         for _ in range(self.on_duration_in_sec):
