@@ -32,7 +32,7 @@ IR_fps = 30
 # ==============================================
 # LED PARAMETERS
 # ==============================================
-led_on = False
+led_on = True
 led_baud_rate = 9800
 led_timeout = 1
 led_on_duration_in_sec = 3
@@ -115,17 +115,15 @@ exp_info = {
 # ==============================================
 # event types
 # ==============================================
-session_start_msg = "session_start"
-session_end_msg = "session_end"
-trail_start_msg = "trail_start"
-trail_end_msg = "trail_end"
-vas_rating_msg = "vas_rating"
-program_start_msg = "program_start"
-marker_msg = "marker"
-led_start_on_msg = "led_start_on"
-led_start_off_msg = "led_start_off"
-led_finish_on_msg = "led_finish_on"
-led_finish_off_msg = "led_finish_off"
+session_start_msg = "SESSION_START"
+session_end_msg = "SESSION_END"
+trail_start_msg = "TRIAL_START"
+trail_end_msg = "TRIAL_END"
+vas_rating_msg = "VAS_RATING"
+program_start_msg = "PROGRAM_START"
+marker_msg = "MARKER"
+led_on_msg = "LED_ON"
+led_off_msg = "LED_OFF"
 
 events = {
     session_start_msg: 10,
@@ -135,10 +133,8 @@ events = {
     vas_rating_msg: 50,
     program_start_msg: 60,
     marker_msg: 70,
-    led_start_on_msg: 80,
-    led_start_off_msg: 90,
-    led_finish_on_msg: 100,
-    led_finish_off_msg: 110,
+    led_on_msg: 80,
+    led_off_msg: 90,
 }
 
 # ==============================================

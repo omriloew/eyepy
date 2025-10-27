@@ -11,8 +11,58 @@ class SyncError(Exception):
     pass
 
 def _get_numeric_data_cols(df: pd.DataFrame, exclude: List[str]) -> List[str]:
+    """Get numeric columns, excluding specified columns and discrete columns (starting with _)."""
     exclude_set = set(exclude)
-    return [c for c in df.columns if c not in exclude_set and pd.api.types.is_numeric_dtype(df[c])]
+    return [c for c in df.columns if c not in exclude_set and pd.api.types.is_numeric_dtype(df[c]) and not c.startswith('_')]
+
+def _get_discrete_cols(df: pd.DataFrame, exclude: List[str]) -> List[str]:
+    """Get discrete columns that start with _ and should not use window pooling."""
+    exclude_set = set(exclude)
+    return [c for c in df.columns if c not in exclude_set and c.startswith('_')]
+
+def _nearest_discrete_values_at_times(device_times_ir: np.ndarray,
+                                    device_vals: pd.DataFrame,
+                                    query_times_ir: np.ndarray,
+                                    window_ms: float) -> pd.DataFrame:
+    """
+    Find discrete values at query times within a time window.
+    For discrete columns (starting with _), we find values within window_ms of the query time.
+    If no value exists within the window, returns NaN.
+    """
+    # Sort by time for efficiency
+    order = np.argsort(device_times_ir)
+    dt = device_times_ir[order]
+    vals = device_vals.iloc[order].copy()
+    
+    # Create helper DataFrame with time and values
+    helper = pd.DataFrame({TIME_COL: dt})
+    for c in device_vals.columns:
+        helper[c] = vals[c].values
+    
+    # Convert window_ms to seconds
+    window_sec = window_ms / 1000.0
+    
+    # Initialize result DataFrame with NaN values
+    discrete_cols = [c for c in device_vals.columns if c.startswith('_')]
+    result = pd.DataFrame(index=range(len(query_times_ir)), columns=discrete_cols)
+    result[:] = np.nan
+    
+    # For each query time, find values within the window
+    for i, query_time in enumerate(query_times_ir):
+        # Find all device times within the window
+        time_diff = np.abs(dt - query_time)
+        within_window = time_diff <= window_sec
+        
+        if np.any(within_window):
+            # Find the closest time within the window
+            closest_idx = np.argmin(time_diff[within_window])
+            actual_idx = np.where(within_window)[0][closest_idx]
+            
+            # Set the discrete values for this query time
+            for col in discrete_cols:
+                result.iloc[i, result.columns.get_loc(col)] = helper.iloc[actual_idx][col]
+    
+    return result
 
 def _extract_event_series(df: pd.DataFrame) -> pd.DataFrame:
     """מחזיר רק אירועים (label+time), ממויין בזמן, בלי NaN בלייבל."""
@@ -170,84 +220,120 @@ def _windowed_average_at_times(device_times_ir: np.ndarray,
 
     return pd.DataFrame(out)
 
-def synchronize_to_IR(
-    df_IR: pd.DataFrame,
+def synchronize_to_SWIR(
+    df_SWIR: pd.DataFrame,
     devices: Dict[str, pd.DataFrame],  # {"VC": df_vc, "EEG": df_eeg, "MD": df_md, ... (אפשר לכלול גם "IR": df_IR אך אין צורך)}
     df_E: pd.DataFrame,
     window_ms: float = 5.0
 ) -> Tuple[pd.DataFrame, Dict[str, Tuple[float,float]]]:
     """
-    מחזיר:
-      - DataFrame מסונכרן לציר ה-IR (שומר את עמודות IR המקוריות + עמודות ממוצעות מכל מכשיר עם קידומת)
-      - dict עם פרמטרי המיפוי למעקב: {"IR->E": (a,b), "VC->E": (a,b), ..., "VC->IR": (a,b), ...}
+    Synchronize multiple device data to SWIR timeline.
+    
+    Features:
+    - Ignores non-numeric columns automatically
+    - Discrete columns (starting with _) use nearest-neighbor matching within time window
+    - Numeric columns use windowed averaging for smooth interpolation
+    
+    Parameters:
+    - df_SWIR: Reference timeline (SWIR data)
+    - devices: Dictionary of device DataFrames
+    - df_E: Event timeline for synchronization
+    - window_ms: Window size in milliseconds for numeric column averaging
+    
+    Returns:
+      - DataFrame synchronized to SWIR timeline (preserves original SWIR columns + averaged device columns with prefixes)
+      - dict with mapping parameters for tracking: {"IR->E": (a,b), "VC->E": (a,b), ..., "VC->IR": (a,b), ...}
     """
     # בדיקות בסיס
-    for name, df in [("IR", df_IR), ("E", df_E), *devices.items()]:
+    for name, df in [("SWIR", df_SWIR), ("E", df_E), *devices.items()]:
         if TIME_COL not in df.columns or EVENT_COL not in df.columns:
             raise SyncError(f"{name}: חסרות עמודות חובה '{TIME_COL}' או '{EVENT_COL}'.")
 
     # התאמות אפיניות ל-E
-    a_IR_E, b_IR_E = _fit_device_to_E(df_IR, df_E)
-    mappings = {"IR->E": (a_IR_E, b_IR_E)}
+    devices["EVENTS"] = df_E
+    a_SWIR_E, b_SWIR_E = _fit_device_to_E(df_SWIR, df_E)
+    mappings = {"SWIR->E": (a_SWIR_E, b_SWIR_E)}
 
     device_to_IR_map: Dict[str, Tuple[float,float]] = {}
 
     # ציר הייחוס של IR
-    ir_times = df_IR[TIME_COL].to_numpy(dtype=float)
+    swir_times = df_SWIR[TIME_COL].to_numpy(dtype=float)
 
     # נתחיל את פלט עם עותק של IR (לא פוגעים במקור)
-    out = df_IR.copy()
+    out = df_SWIR.copy()
 
     # עבור כל מכשיר: התאמת dev->E, הרכבת dev->IR, ממוצע חלון והוספה ל-out
     for dev_name, df_dev in devices.items():
         a_dev_E, b_dev_E = _fit_device_to_E(df_dev, df_E)
         mappings[f"{dev_name}->E"] = (a_dev_E, b_dev_E)
 
-        a_dev_IR, b_dev_IR = _compose_device_to_IR((a_dev_E, b_dev_E), (a_IR_E, b_IR_E))
-        device_to_IR_map[dev_name] = (a_dev_IR, b_dev_IR)
-        mappings[f"{dev_name}->IR"] = (a_dev_IR, b_dev_IR)
+        a_dev_SWIR, b_dev_SWIR = _compose_device_to_IR((a_dev_E, b_dev_E), (a_SWIR_E, b_SWIR_E))
+        device_to_IR_map[dev_name] = (a_dev_SWIR, b_dev_SWIR)
+        mappings[f"{dev_name}->SWIR"] = (a_dev_SWIR, b_dev_SWIR)
 
         # ממפים את כל הזמנים של המכשיר לציר IR
         t_dev = df_dev[TIME_COL].to_numpy(dtype=float)
-        t_ir_mapped = a_dev_IR * t_dev + b_dev_IR
+        t_swir_mapped = a_dev_SWIR * t_dev + b_dev_SWIR
 
-        # עמודות דאטה נומריות
-        cols = _get_numeric_data_cols(df_dev, exclude=[TIME_COL, EVENT_COL])
-        if not cols:
+        # עמודות דאטה נומריות (עם window pooling)
+        numeric_cols = _get_numeric_data_cols(df_dev, exclude=[TIME_COL, EVENT_COL])
+        discrete_cols = _get_discrete_cols(df_dev, exclude=[TIME_COL, EVENT_COL])
+        
+        if not numeric_cols and not discrete_cols:
             # אין עמודות דאטה — מדלגים
             continue
-
-        dev_vals = df_dev[cols]
-        # ממוצע חלון יעיל סביב כל זמן IR
-        avg_df = _windowed_average_at_times(t_ir_mapped, dev_vals, ir_times, window_ms)
-
-        # קידומת שם המכשיר
-        avg_df.columns = [f"{dev_name}__{c}" for c in avg_df.columns]
-
-        # מיזוג לפי אינדקס (אותו סדר כמו df_IR)
-        out = pd.concat([out.reset_index(drop=True), avg_df.reset_index(drop=True)], axis=1)
+        
+        result_dfs = []
+        
+        # Handle numeric columns with window pooling
+        if numeric_cols:
+            dev_vals_numeric = df_dev[numeric_cols] 
+            # ממוצע חלון יעיל סביב כל זמן IR
+            avg_df = _windowed_average_at_times(t_swir_mapped, dev_vals_numeric, swir_times, window_ms)
+            # קידומת שם המכשיר
+            avg_df.columns = [f"{dev_name}__{c}" for c in avg_df.columns]
+            result_dfs.append(avg_df)
+        
+        # Handle discrete columns with time window constraint
+        if discrete_cols:
+            dev_vals_discrete = df_dev[discrete_cols]
+            # מציאת הערכים הקרובים ביותר בתוך חלון זמן
+            discrete_df = _nearest_discrete_values_at_times(t_swir_mapped, dev_vals_discrete, swir_times, window_ms)
+            # קידומת שם המכשיר
+            discrete_df.columns = [f"{dev_name}__{c}" for c in discrete_df.columns]
+            result_dfs.append(discrete_df)
+        
+        # Combine all results for this device
+        if result_dfs:
+            device_result = pd.concat(result_dfs, axis=1)
+            # מיזוג לפי אינדקס (אותו סדר כמו df_IR)
+            out = pd.concat([out.reset_index(drop=True), device_result.reset_index(drop=True)], axis=1)
 
     return out, mappings
 
-df_E   = pd.read_csv("rawResultsExample/E.csv")
-df_IR  = pd.read_csv("rawResultsExample/IR.csv")
-df_VC  = pd.read_csv("rawResultsExample/VC.csv")
-df_EL = pd.read_csv("rawResultsExample/EL.csv")
-df_MD  = pd.read_csv("rawResultsExample/MD.csv")
-devices = {
-    "VC": df_VC,
-    "EL": df_EL,
-    "MD": df_MD,
-    # אפשר להוסיף טבלאות נוספות באותה צורה
-}
+def main():
+    df_E   = pd.read_csv("rawResultsExample/E.csv")
+    df_SWIR  = pd.read_csv("rawResultsExample/SWIR.csv")
+    df_VC  = pd.read_csv("rawResultsExample/VC.csv")
+    df_EL = pd.read_csv("rawResultsExample/EL.csv")
+    df_MD  = pd.read_csv("rawResultsExample/MD.csv")
+    devices = {
+        "VC": df_VC,
+        "EL": df_EL,
+        "MD": df_MD,
+    }
 
-synced_df, maps = synchronize_to_IR(
-    df_IR=df_IR,
-    devices=devices,
-    df_E=df_E,
-    window_ms=5.0  # אפשר לשנות: 2.0/10.0 לפי רזולוציה ונויז
-)
 
-# לשמור לקובץ:
-synced_df.to_csv("synced_to_IR.csv", index=False)
-print("Mappings:", maps)
+    synced_df, mappings = synchronize_to_SWIR(
+        df_SWIR=df_SWIR,
+        devices=devices,
+        df_E=df_E,
+        window_ms=5.0  # אפשר לשנות: 2.0/10.0 לפי רזולוציה ונויז
+    )
+
+    # לשמור לקובץ:
+    synced_df.to_csv("synced_to_SWIR.csv", index=False)
+    print("Mappings:", mappings)
+
+if __name__ == "__main__":
+    main()

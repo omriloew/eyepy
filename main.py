@@ -6,7 +6,7 @@ import expirimentUtils
 import eegHandler
 import MedocHandler
 import VideoCamera
-import IRCamera
+import SWIR
 import LED
 import eyelinkHandler
 import dataRecordHandler
@@ -35,7 +35,7 @@ not_demo = not curr_session.endswith('demo')
 # ==============================================
 # INIT EXPERIMENT
 # ==============================================
-clock = core.monotonicClock
+clock = core.Clock()
 win = visual.Window(size=config.scrsize, color='grey', units='pix', fullscr=config.full_screen)
 mouse = event.Mouse(visible=False)
 draw = drawingHandler.Draw(win)
@@ -49,10 +49,10 @@ if not_demo:
     dataPath = log.output_dir
     el = eyelinkHandler.Eyelink(dataPath)
     log.el = el
-    ir = IRCamera.init(log.output_dir)
+    swir = SWIR.init(log.output_dir)
     vc = VideoCamera.init(log.output_dir)
 else:
-    log = ir = vc = None
+    log = swir = vc = None
 
 # ==============================================
 # HELPER FUNCTIONS
@@ -63,16 +63,17 @@ def generate_wait_times(trails_number=config.main_trails_number):
 def vas(instructions=None):
     final_rating, reaction_time = expirimentUtils.pain_vas(win, instructions=instructions)
     if not_demo:
-        log.event(config.vas_rating_msg, config.vas_rating_msg + "_" + str(final_rating), led_flash=False)
+        log.event(config.vas_rating_msg, config.vas_rating_msg + "_" + str(final_rating))
     return final_rating, reaction_time
 
 def start_session():
     """Start a session and initialize data recording."""
+    clock.reset()
     if curr_session == 'main':
         el.calibrate()
         el.start_recording()
-        ir.calibrate()
-        ir.start_recording()
+        swir.calibrate()
+        swir.start_recording()
         vc.start_recording()
     if not_demo:
         log.start_session()
@@ -88,7 +89,7 @@ def finish_session():
 
     if curr_session == 'main':
         el.stop_recording()
-        ir.stop_recording()
+        swir.stop_recording()
         vc.stop_recording()
 
 def start_trial(trial_num):

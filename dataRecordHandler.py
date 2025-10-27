@@ -57,18 +57,17 @@ class DataRecordHandler:
         
     def _generate_filename(self, data_type):
         """Generate a unique filename with timestamp."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        return f"{self.participant_id}_{self.session_type}_{data_type}_{timestamp}.csv"
+        return f"{self.participant_id}_{self.session_type}_{data_type}.csv"
     
     def start_session(self):
         """Mark the start of a session."""
         self.session_start_time = self.clock.getTime()
-        self.event(config.session_start_msg, led_flash=False)
+        self.event(config.session_start_msg)
         core.wait(0.5)
         for _ in range(config.led_num_flashes):
-            self.event(config.led_start_on_msg, led_flash=False)
+            self.event(config.led_on_msg)
             self.led.flash()
-            self.event(config.led_start_off_msg, led_flash=False)
+            self.event(config.led_off_msg)
             core.wait(config.led_interval_in_sec)
         print(f"Session started: {self.session_type} for participant {self.participant_id}")
 
@@ -98,14 +97,14 @@ class DataRecordHandler:
             'wait_time_before_trial': wait_time,
             'trial_duration': trial_duration,
             'timestamp': datetime.fromtimestamp(timestamp).isoformat(),
-            'time_from_session_start': round(time_from_session_start, 3),
+            'time_from_session_start': round(time_from_session_start, 6),
             **kwargs
         }
         
         self.trial_data.append(trial_entry)
         print(f"Trial {trial_number} logged - Rating: {pain_rating}, RT: {reaction_time}")
     
-    def event(self, event_type ,event_label=None, event_data=None, led_flash=True):
+    def event(self, event_type ,event_label=None, event_data=None):
         """
         Log a general event with timestamp.
         
@@ -121,14 +120,13 @@ class DataRecordHandler:
         event_code = config.events[event_type]
         
         event_entry = {
-            'participant_id': self.participant_id,
-            'session_type': self.session_type,
-            'event_type': event_type,
-            'event_code': event_code,
-            'event_label': event_label,
-            'timestamp': datetime.fromtimestamp(timestamp).isoformat(),
-            'time_from_session_start': round(time_from_session_start, 3),
-            'led': led_flash,
+            'time_stamp': round(time_from_session_start, 6),
+            'event_label': event_type,
+            '_participant_id': self.participant_id,
+            '_session_type': self.session_type,
+            '_event_code': event_code,
+            '_event_message': event_label,
+            '_date_time': datetime.fromtimestamp(timestamp).isoformat(),
         }
         
         # Add event data if provided
@@ -142,10 +140,6 @@ class DataRecordHandler:
 
         if self.el is not None:
             self.el.send_message(event_label + "_" +str(event_code))
-
-        if led_flash and self.led is not None:
-            self.led.flash()
-            print(f"LED flash triggered for event: {event_type}")
     
     def mark(self, label, code):
         """
@@ -158,12 +152,12 @@ class DataRecordHandler:
     
     def finish_session(self):
         """Mark the end of a session and save all data."""
-        self.event(config.session_end_msg, led_flash=False)
+        self.event(config.session_end_msg)
         core.wait(0.5)
         for _ in range(config.led_num_flashes):
-            self.event(config.led_finish_on_msg, led_flash=False)
+            self.event(config.led_on_msg)
             self.led.flash()
-            self.event(config.led_finish_off_msg, led_flash=False)
+            self.event(config.led_off_msg)
             core.wait(config.led_interval_in_sec)
         self.save_all()
         
@@ -211,6 +205,10 @@ class DataRecordHandler:
             print("No experiment info to save.")
             return
         
+        # Add timestamp to experiment info
+        current_time = self.clock.getTime() if self.clock else 0
+        timestamp = datetime.fromtimestamp(current_time).isoformat()
+        
         # Save as CSV
         csv_filepath = os.path.join(self.output_dir, self.exp_info_filename)
         
@@ -223,6 +221,10 @@ class DataRecordHandler:
             else:
                 flattened_info[key] = value
         
+        # Add timestamp to flattened info
+        flattened_info['timestamp'] = timestamp
+        flattened_info['time_from_session_start'] = current_time - self.session_start_time if self.session_start_time else 0
+        
         with open(csv_filepath, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=flattened_info.keys())
             writer.writeheader()
@@ -234,8 +236,13 @@ class DataRecordHandler:
         json_filename = self.exp_info_filename.replace('.csv', '.json')
         json_filepath = os.path.join(self.output_dir, json_filename)
         
+        # Add timestamp to JSON data
+        json_data = self.exp_info.copy()
+        json_data['timestamp'] = timestamp
+        json_data['time_from_session_start'] = current_time - self.session_start_time if self.session_start_time else 0
+        
         with open(json_filepath, 'w') as jsonfile:
-            json.dump(self.exp_info, jsonfile, indent=4, default=str)
+            json.dump(json_data, jsonfile, indent=4, default=str)
         
         print(f"Experiment info (JSON) saved to: {json_filepath}")
     

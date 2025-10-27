@@ -4,12 +4,11 @@ IR Camera placeholder module for testing without hardware.
 from datetime import datetime
 
 def init(data_path):
-    """Initialize IR Camera placeholder."""
-    print("IR Camera placeholder initialized")
-    return IRCameraPlaceholder(data_path)
+    """Initialize SWIR Camera."""
+    print("SWIR Camera initialized")
+    return SWIRCamera(data_path)
 
-class IRCameraPlaceholder:
-    """Placeholder for IR Camera functionality."""
+class SWIRCamera:
     
     def __init__(self, data_path):
         self.data_path = data_path
@@ -17,31 +16,31 @@ class IRCameraPlaceholder:
         self.filename = None
 
     def generate_filename(self):
-        """Generate filename for IR recording."""
+        """Generate filename for SWIR recording."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        return f"ir_recording_{timestamp}.avi"
+        return f"swir_recording_{timestamp}.avi"
     
     def calibrate(self):
-        """Calibrate IR camera."""
-        print("IR camera calibrated (placeholder)")
+        """Calibrate SWIR camera."""
+        print("SWIR camera calibrated (placeholder)")
         return True
     
     def start_recording(self):
-        """Start IR recording."""
-        print("IR recording started (placeholder)")
+        """Start SWIR recording."""
+        print("SWIR recording started (placeholder)")
         self.recording = True
         return True
 
     
     def stop_recording(self):
-        """Stop IR recording."""
-        print("IR recording stopped (placeholder)")
+        """Stop SWIR recording."""
+        print("SWIR recording stopped (placeholder)")
         self.recording = False
         return True
 
     def save_recording(self):
-        """Save IR recording."""
-        print("IR recording saved (placeholder)")
+        """Save SWIR recording."""
+        print("SWIR recording saved (placeholder)")
         return True
     
     def is_recording(self):
