@@ -13,28 +13,25 @@ def main():
 
     avi_file_path = 'rawFilesToTestWith/1-9_M_30exp.avi'
     edf_file_path = 'out.edf'
-    medoc_csv_path = 'output/medoc.csv'
     figures_dir_path = 'output/figures'
     output_dir = 'post_exp_raw_process_results'
 
     session_type = 'main'
     participant_id = '002'
+    session_number = '1'
 
-    events_csv_path = f'log_files/{session_type}/{participant_id}/{participant_id}_{session_type}_events.csv'
-    output_csv_sufix = f'{participant_id}_{session_type}.csv'
+    events_csv_path = f'log_files/{participant_id}/{session_number}/{session_type}/{participant_id}_{session_type}_events.csv'
+    medoc_csv_path = f'log_files/{participant_id}/{session_number}/{session_type}/{participant_id}_{session_type}_medoc_events.csv'
+    output_csv_sufix = f'{participant_id}_{session_type}_{session_number}.csv'
 
     paticipant_dir = f'{output_dir}/{participant_id}'
     os.makedirs(paticipant_dir, exist_ok=True)
     
-    session_output_dir = f'{paticipant_dir}/{session_type}'
+    session_output_dir = f'{paticipant_dir}/{session_type}_{session_number}'
     if not os.path.exists(session_output_dir):
         os.makedirs(session_output_dir)
     else:
-        session_number = 1
-        while os.path.exists(os.path.join(paticipant_dir, f"{session_type}_{session_number}")):
-            session_number += 1
-        session_output_dir = os.path.join(paticipant_dir, f"{session_type}_{session_number}")
-        os.makedirs(session_output_dir)
+        raise Exception(f"Session output directory already exists: {session_output_dir}")
 
     parser = argparse.ArgumentParser(description='Post-experiment raw data processing')
     parser.add_argument('--input_avi', default='', help='Path to input AVI video file')
@@ -83,8 +80,10 @@ def main():
         print(led_events.head(10).to_string(index=False))
 
     E_df = pd.read_csv(events_csv_path)
+    MD_df = pd.read_csv(medoc_csv_path)
     
     devices = {
+        "MD": MD_df,
     }
 
     synced_df, mappings = sync.synchronize_to_SWIR(

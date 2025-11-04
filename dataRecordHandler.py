@@ -3,7 +3,10 @@ import os
 import json
 from datetime import datetime
 import config
-from psychopy import core
+from psychopy import core, gui
+import coloredPrint as cp
+
+from medockResponse import MedocResponse
 
 class DataRecordHandler:
     """
@@ -11,7 +14,7 @@ class DataRecordHandler:
     Tracks trials, events, pain ratings, and timestamps for experimental sessions.
     """
     
-    def __init__(self,clock, led, el=None, eeg=None):
+    def __init__(self,clock, led, eeg, el=None):
         """
         Initialize the data record handler.
         
@@ -23,35 +26,24 @@ class DataRecordHandler:
         """
         self.participant_id = config.exp_info['participant']
         self.session_type = config.exp_info['session']
+        self.session_number = config.exp_info['session_number']
         self.exp_info = config.exp_info
         self.session_start_time = None
         self.trial_data = []
         self.event_log = []
+        self.medoc_event_log = []
         self.el = el
         self.eeg = eeg
         self.led = led
         self.clock = clock
+        self.inter_session_data = {'temperatures': {}, 'ratings': {}, 'durations': {}}
         
-        if not os.path.exists(config.datapath):
-            os.makedirs(config.datapath)
-        
-        self.output_dir = os.path.join(config.datapath,self.session_type, self.participant_id)
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-        else:
-            print(f"Output directory already exists: {self.output_dir}")
-            participant_session_number = 1
-            while os.path.exists(os.path.join(config.datapath, self.session_type, f"{self.participant_id}_{participant_session_number}")):
-                participant_session_number += 1
-            self.output_dir = os.path.join(config.datapath, self.session_type, f"{self.participant_id}_{participant_session_number}")
-            os.makedirs(self.output_dir)
-            print(f"Output directory created: {self.output_dir}")
 
-        # Generate filenames
+        self.output_dir = config.exp_info['output_dir']
         self.trials_filename = self._generate_filename('trials')
         self.events_filename = self._generate_filename('events')
         self.exp_info_filename = self._generate_filename('exp_info')
-        
+        self.medoc_events_filename = self._generate_filename('medoc_events')
         # Save experiment info immediately
         self.save_exp_info()
         
@@ -69,11 +61,34 @@ class DataRecordHandler:
             self.led.flash()
             self.event(config.led_off_msg)
             core.wait(config.led_interval_in_sec)
+        cp.print_success("[LOG] - ", end="")
         print(f"Session started: {self.session_type} for participant {self.participant_id}")
+    
+    def load_session_trials_data(self, session_type: str):
+        """Load session data from CSV files."""
+        filename = f"{self.participant_id}_{session_type}_trials.csv"
+        output_dir = os.path.join(config.datapath, self.participant_id, str(self.session_number), session_type)
+        filepath = os.path.join(output_dir, filename)
+        temperature_data = []
+        rating_data = []
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    temperature_data.append(row['temperature'])
+                    rating_data.append(row['pain_rating'])
+        else:
+            temperature_data = config.manual_temperature_data
+            rating_data = config.manual_rating_data
+        cp.print_success("[LOG] - ", end="")
+        print(f"Loaded temperature data: {temperature_data}")
+        cp.print_success("[LOG] - ", end="")
+        print(f"Loaded rating data: {rating_data}")
+        return temperature_data, rating_data
 
     
     def trial(self, trial_number, pain_rating=None, reaction_time=None, 
-                  wait_time=None, trial_duration=None, **kwargs):
+                  wait_time=None, trial_duration=None, temperature=None, **kwargs):
         """
         Log data for a single trial.
         
@@ -94,17 +109,19 @@ class DataRecordHandler:
             'trial_number': trial_number,
             'pain_rating': pain_rating,
             'reaction_time': reaction_time,
+            'temperature': temperature,
             'wait_time_before_trial': wait_time,
             'trial_duration': trial_duration,
             'timestamp': datetime.fromtimestamp(timestamp).isoformat(),
             'time_from_session_start': round(time_from_session_start, 6),
             **kwargs
         }
-        
-        self.trial_data.append(trial_entry)
+        cp.print_info("[LOG]", end="")
         print(f"Trial {trial_number} logged - Rating: {pain_rating}, RT: {reaction_time}")
+        self.trial_data.append(trial_entry)
+
     
-    def event(self, event_type ,event_label=None, event_data=None):
+    def event(self, event_type ,event_label=None, event_data=None, temperature=None):
         """
         Log a general event with timestamp.
         
@@ -127,6 +144,7 @@ class DataRecordHandler:
             '_event_code': event_code,
             '_event_message': event_label,
             '_date_time': datetime.fromtimestamp(timestamp).isoformat(),
+            '_temperature': temperature,
         }
         
         # Add event data if provided
@@ -134,21 +152,32 @@ class DataRecordHandler:
             event_entry.update(event_data)
         
         self.event_log.append(event_entry)
-
-        if self.eeg is not None:
-            self.eeg.send_trigger(event_code)
-
-        if self.el is not None:
-            self.el.send_message(event_label + "_" +str(event_code))
+        
+        self.eeg.send_trigger(event_code)
+        self.el.send_message(event_label + "_" +str(event_code))
     
-    def mark(self, label, code):
+    def medoc_event(self, medoc_response: MedocResponse):
         """
-        Log a marker event (for EEG, Eyelink, etc.).
+        Log a Medoc event with timestamp.
         Args:
-            label: Marker label/description
-            code: Numeric code for the marker
+            medoc_response: MedocResponse object
         """
-        self.event(config.marker_msg, f"{label}", {'label': label, 'code': code})
+        medoc_event_entry = {
+            'time_stamp': round(medoc_response.timestamp, 6),
+            'command_id': medoc_response.command_id,
+            'system_state': medoc_response.system_state,
+            'test_state': medoc_response.test_state,
+            'resp_code': medoc_response.resp_code,
+            'test_time_s': medoc_response.test_time_s,
+            'temperature_c': medoc_response.temperature_c,
+            'covas': medoc_response.covas,
+            'yes': medoc_response.yes,
+            'no': medoc_response.no,
+            '_participant_id': self.participant_id,
+            '_session_type': self.session_type, 
+        }
+        self.medoc_event_log.append(medoc_event_entry)
+
     
     def finish_session(self):
         """Mark the end of a session and save all data."""
@@ -162,6 +191,7 @@ class DataRecordHandler:
         self.save_all()
         
         session_duration = self.clock.getTime() - self.session_start_time if self.session_start_time else 0
+        cp.print_success("[LOG] - ", end="")
         print(f"Session finished: {self.session_type}")
         print(f"Total duration: {session_duration:.2f} seconds")
         print(f"Total trials logged: {len(self.trial_data)}")
@@ -181,11 +211,13 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerows(self.trial_data)
         
+        cp.print_success("[LOG] - ", end="")
         print(f"Trial data saved to: {filepath}")
     
     def save_events(self):
         """Save event log to CSV file."""
         if not self.event_log:
+            cp.print_warning("[LOG] - ", end="")
             print("No event data to save.")
             return
         
@@ -197,11 +229,31 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerows(self.event_log)
         
+        cp.print_success("[LOG] - ", end="")
         print(f"Event data saved to: {filepath}")
+
+    def save_medoc_events(self):
+        """Save event log to CSV file."""
+        if not self.medoc_event_log:
+            cp.print_warning("[LOG] - ", end="")
+            print("No medoc event data to save.")
+            return
+        
+        filepath = os.path.join(self.output_dir, self.medoc_events_filename)
+        
+        with open(filepath, 'w', newline='') as csvfile:
+            fieldnames = self.medoc_event_log[0].keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.medoc_event_log)
+        
+        cp.print_success("[LOG] - ", end="")
+        print(f"Medoc event data saved to: {filepath}")
     
     def save_exp_info(self):
         """Save experiment info to both CSV and JSON files."""
         if not self.exp_info:
+            cp.print_warning("[LOG] - ", end="")
             print("No experiment info to save.")
             return
         
@@ -230,6 +282,7 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerow(flattened_info)
         
+        cp.print_success("[LOG] - ", end="")
         print(f"Experiment info (CSV) saved to: {csv_filepath}")
         
         # Save as JSON (more readable for complex data)
@@ -244,12 +297,14 @@ class DataRecordHandler:
         with open(json_filepath, 'w') as jsonfile:
             json.dump(json_data, jsonfile, indent=4, default=str)
         
+        cp.print_success("[LOG] - ", end="")
         print(f"Experiment info (JSON) saved to: {json_filepath}")
     
     def save_all(self):
         """Save trial data, event log, and experiment info."""
         self.save_trials()
         self.save_events()
+        self.save_medoc_events()
         self.save_exp_info()
     
     def _flatten_exp_info(self):
@@ -297,3 +352,4 @@ class DataRecordHandler:
             summary['max_reaction_time'] = max(rts)
         
         return summary
+    

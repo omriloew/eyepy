@@ -10,7 +10,7 @@ def left_2_right(msg):
     return msg
 
 
-def generate_wait_times(mean=config.intervals_mean, std=config.intervals_std, min_time=config.intervals_min_time, max_time=config.intervals_max_time, method=config.intervals_generation_method, trails_number=config.main_trails_number):
+def generate_wait_times(mean=config.intervals_mean, std=config.intervals_std, min_time=config.intervals_min_time, max_time=config.intervals_max_time, method=config.intervals_generation_method, trails_number=config.num_trails):
     """
     Generate inter-trial intervals using various distribution methods.
     Different methods are used in experimental psychology for different purposes.

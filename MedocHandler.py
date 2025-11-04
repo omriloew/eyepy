@@ -4,188 +4,358 @@ Medoc pain device interface.
 Handles TCP communication with Medoc pain machine.
 """
 
-import socket
-import time
-from typing import Optional, Dict, Any
+from typing import Dict
 import config
-from psychopy import core
+from psychopy import core, event
+import socket, struct, time, binascii
+from dataclasses import dataclass
+import random
+import dataRecordHandler
+import LED
+import coloredPrint as cp
+from medockResponse import MedocResponse, check_for_escape, _build_command
+# ===== פרוטוקול Open Control (על פי הדוגמה שצרפת) =====
 
+def init(log: dataRecordHandler.DataRecordHandler = None):
+    if not config.medoc_on or config.exp_info['demo']:
+        return Medocplaceholder(log=log)
+    return Medoc(log=log)
 
 class Medoc:
-    """Medoc pain device interface."""
-    
-    def __init__(self, dry_run: bool = False):
-        self.dry_run = dry_run
-        self.host = config.medoc_host
-        self.port = config.medoc_port
-        self.default_program = config.medoc_default_program
-        self.programs = config.medoc_programs
-        
-        # Current active program
-        self.current_program = self.default_program
-        
-        # TCP connection
-        self.socket = None
-        
-        if not dry_run:
-            self._init_connection()
-    
-    def _init_connection(self):
-        """Initialize TCP connection to Medoc."""
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(5.0)  # 5 second timeout
-            self.socket.connect((self.host, self.port))
-            print(f"Connected to Medoc at {self.host}:{self.port}")
-        except Exception as e:
-            print(f"Warning: Could not connect to Medoc: {e}")
-            self.socket = None
-    
-    def _send_command(self, cmd: str) -> str:
-        """Send command to Medoc and return response."""
-        if self.dry_run:
-            print(f"[DRY-RUN] Medoc command: {cmd}")
-            return "OK"
-        
-        if not self.socket:
-            print(f"[MOCK] Medoc command: {cmd}")
-            return "OK"
-        
-        try:
-            # Send command
-            self.socket.send(f"{cmd}\r\n".encode('ascii'))
-            
-            # Receive response
-            response = self.socket.recv(1024).decode('ascii').strip()
-            return response
-        except Exception as e:
-            print(f"Warning: Medoc communication error: {e}")
-            return "ERROR"
-    
-    def select_tp(self, program: str = None) -> bool:
-        """Select thermal program."""
-        if program is None:
-            program = self.default_program
-        
-        # Check if program is a named program
-        if program in self.programs:
-            program_code = self.programs[program]
+    def __init__(self, log: dataRecordHandler.DataRecordHandler = None, host: str = config.medoc_host, port: int = config.medoc_port, timeout: float = 5.0):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.program = config.medoc_programs.get(config.exp_info['session'], '00010001')
+        self.log = log
+        self.last_temp = config.medoc_base_temperature
+        cp.print_success("[Medoc]", end="")
+        print(" - Initialized")
+
+    def _xfer(self, payload: bytes) -> MedocResponse:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(self.timeout)
+            s.connect((self.host, self.port))
+            s.sendall(payload)
+            # קריאה ראשונה
+            buf = s.recv(1024)
+            # המשך קריאה עד שאין עוד (הדוגמה המקורית קראה עוד 17-בייטים בלולאה)
+            while True:
+                try:
+                    more = s.recv(4096)
+                except socket.timeout:
+                    break
+                if not more:
+                    break
+                buf += more
+        return MedocResponse.parse(buf)
+
+    # ===== פקודות נוחות =====
+
+    def cmd(self, command: str, log: bool = True , **kwargs) -> MedocResponse:
+        respones =  self._xfer(_build_command(command, **kwargs))
+        if log:
+            self.log.medoc_event(respones)
+            self.log.event("MEDOC_" + command, temperature=respones.temperature_c)
+        cp.print_success("[Medoc]", end="")
+        print(f" - Command: {command} sent")
+        if config.debug:
+            cp.print_debug("[DEBUG]", end="")
+            print(f" - Command: {command} response: {respones}")
+        return respones
+
+    def get_status(self) -> MedocResponse:
+        response = self._xfer(_build_command('GET_STATUS'))
+        self.log.medoc_event(response)
+        return response
+
+    def select_tp(self, program_bits: str) -> MedocResponse:
+        # program_bits דוגמת '00011100'
+        return self.cmd('SELECT_TP', program_bits)
+
+    def start(self) -> MedocResponse:
+        return self.cmd('START')
+
+    def pause(self) -> MedocResponse:
+        return self.cmd('PAUSE')
+
+    def trigger(self, log: bool = True) -> MedocResponse:
+        return self.cmd('TRIGGER', log=log)
+
+    def stop(self) -> MedocResponse:
+        return self.cmd('STOP')
+
+    def abort(self) -> MedocResponse:
+        return self.cmd('ABORT')
+
+    def yes(self) -> MedocResponse:
+        return self.cmd('YES')
+
+    def no(self) -> MedocResponse:
+        return self.cmd('NO')
+
+    def keyup(self) -> MedocResponse:
+        return self.cmd('KEYUP')
+
+    def covas(self, value: int) -> MedocResponse:
+        # שלח ערך 0..255
+        return self.cmd('COVAS', value)
+
+    def vas(self, value: int) -> MedocResponse:
+        # שלח ערך 0..10 (לפי הדוגמה)
+        return self.cmd('VAS', value)
+
+    def t_up(self, delta_c: float) -> MedocResponse:
+        # נשלח Δ°C * 100 כשלם
+        return self.cmd('T_UP', float(delta_c))
+
+    def t_down(self, delta_c: float) -> MedocResponse:
+        return self.cmd('T_DOWN', float(delta_c))
+
+    def wait(self, seconds: float, log_medoc: bool = True):
+        if log_medoc:
+            for i in range(seconds*100):
+                core.wait(0.01)
+                self.get_status()
         else:
-            # Assume it's a direct program code
-            program_code = program
-        
-        cmd = f"SELECT_TP {program_code}"
-        response = self._send_command(cmd)
-        
-        if "OK" in response:
-            self.current_program = program_code
-            print(f"Selected Medoc program: {program} ({program_code})")
-        
-        return "OK" in response
-    
-    def get_program(self, name: str = None) -> str:
-        """Get program code by name."""
-        if name is None:
-            return self.current_program
-        
-        return self.programs.get(name, name)
-    
-    def list_programs(self) -> Dict[str, str]:
-        """List all available programs."""
-        return self.programs.copy()
-    
-    def start(self) -> bool:
-        """Start pain stimulation."""
-        cmd = "START"
-        response = self._send_command(cmd)
-        return "OK" in response
-    
-    def stop(self) -> bool:
-        """Stop pain stimulation."""
-        cmd = "STOP"
-        response = self._send_command(cmd)
-        return "OK" in response
+            core.wait(seconds)
 
-    def yes(self) -> bool:
-        """Set yes."""
-        cmd = "YES"
-        response = self._send_command(cmd)
-        print(f"Medoc command: {cmd} responded with: {response}")
-        return "OK" in response
-
-    def set_intensity(self, intensity: int) -> bool:
-        """Set pain intensity."""
-        cmd = f"SET_INTENSITY {intensity}"
-        response = self._send_command(cmd)
-        return "OK" in response
-
-    def trigger(self) -> bool:
-        """Trigger pain stimulation."""
-        cmd = "TRIGGER"
-        response = self._send_command(cmd)
-        return "OK" in response
     
-    def get_status(self) -> Dict[str, Any]:
-        """Get device status."""
-        cmd = "STATUS"
-        response = self._send_command(cmd)
-        
-        # Parse status response
-        status = {
-            'connected': self.socket is not None,
-            'response': response
-        }
-        
-        # Try to parse specific status fields
-        if "OK" in response:
-            status['ready'] = True
+    def wait_until_status_is(self, status: str):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Waiting until status is: {status}")
+        response = self.get_status()
+        while response.system_state != status:
+            core.wait(0.01)
+            response = self.get_status()
+            if check_for_escape():
+                self.abort()
+                cp.print_error("Escape key pressed, aborting session")
+                core.quit()
+
+    def wait_until_test_state_is(self, test_state: str):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Waiting until test state is: {test_state}")
+        response = self.get_status()
+        while response.test_state != test_state:
+            core.wait(0.01)
+            response = self.get_status()
+            if check_for_escape():
+                self.abort()
+                cp.print_error("Escape key pressed, aborting session")
+                core.quit()
+
+    def start_thermal_program(self):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Starting thermal program {self.program}")
+        self.select_tp(self.program) #select the program
+        self.wait(1)
+        self.start() #start pretest
+        self.wait(1)
+        self.start() #start test
+        self.wait(1)
+
+    def set_program(self, program: str):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Setting program to: {program}")
+        self.program = config.medoc_programs.get(program, '00010001')
+
+    def start_threshold_trial(self):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Starting threshold trial")
+        self.trigger()
+
+    def stop_threshold_trial(self, trial_num: int):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Stopping threshold trial {trial_num}")
+        temperature = self.yes().temperature_c #trigger medoc yes to stop trail
+        return temperature
+
+    def skip_initial_pain_stimulus(self):
+        """
+        In the vas search program, the first trail is fixed,
+        so we want to skip it to choose the temperature by the user
+        """
+        cp.print_info("[Medoc]", end="")
+        print(f" - Skipping initial pain stimulus")
+        self.trigger(log=False)
+        self.wait(1)
+        self.wait_until_test_state_is("READY")
+
+    def pain_stimulus_trial(self, temperature: float):
+        cp.print_info("[Medoc]", end="")
+        print(f" - Pain stimulus trial at temperature: {temperature}")
+        t_up = temperature - self.last_temp 
+        self.last_temp = temperature
+        self.t_up(t_up)
+        self.wait(0.2)
+        self.trigger()
+        self.wait_until_test_state_is("READY")
+
+class Medocplaceholder:
+    def __init__(self, log: dataRecordHandler.DataRecordHandler):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(" - Initialized")
+        self.clock = core.Clock()
+        self.log = log
+        self.program = config.medoc_programs.get(config.exp_info['session'], '00010001')
+        self.last_temp = config.medoc_base_temperature
+
+    def _mock_response(self, command: str, test_state: str, temperature: float = None):
+        if temperature is None:
+            temperature = self._random_temperature()
+        return MedocResponse(length=0, timestamp=self.clock.getTime(), command_id=command, system_state=0, test_state=test_state, resp_code=0, test_time_s=0, temperature_c=temperature, covas=0, yes=0, no=0, message=b'')
+
+    def _random_temperature(self):
+        return random.uniform(30, 50)
+
+    def cmd(self, command: str, log: bool = True , **kwargs) -> MedocResponse:
+        respones =  self._mock_response(command, 'READY')
+        if log:
+            self.log.medoc_event(respones)
+            self.log.event("MEDOC_" + command, temperature=respones.temperature_c)
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Command: {command} sent")
+        return respones
+
+    def get_status(self):
+        return self._mock_response('GET_STATUS', 'READY')
+
+    def select_tp(self, program_bits: str) -> MedocResponse:
+        # program_bits דוגמת '00011100'
+        return self.cmd('SELECT_TP', program_bits)
+
+    def start(self) -> MedocResponse:
+        return self.cmd('START')
+
+    def pause(self) -> MedocResponse:
+        return self.cmd('PAUSE')
+
+    def trigger(self, log: bool = True) -> MedocResponse:
+        return self.cmd('TRIGGER', log=log)
+
+    def stop(self) -> MedocResponse:
+        return self.cmd('STOP')
+
+    def abort(self) -> MedocResponse:
+        return self.cmd('ABORT')
+
+    def yes(self) -> MedocResponse:
+        return self.cmd('YES')
+
+    def no(self) -> MedocResponse:
+        return self.cmd('NO')
+
+    def keyup(self) -> MedocResponse:
+        return self.cmd('KEYUP')
+
+    def covas(self, value: int) -> MedocResponse:
+        # שלח ערך 0..255
+        return self.cmd('COVAS', value)
+
+    def vas(self, value: int) -> MedocResponse:
+        # שלח ערך 0..10 (לפי הדוגמה)
+        return self.cmd('VAS', value)
+
+    def t_up(self, delta_c: float) -> MedocResponse:
+        # נשלח Δ°C * 100 כשלם
+        return self.cmd('T_UP', float(delta_c))
+
+    def t_down(self, delta_c: float) -> MedocResponse:
+        return self.cmd('T_DOWN', float(delta_c))
+
+    def wait(self, seconds: float, log_medoc: bool = True):
+        if log_medoc:
+            for i in range(int(seconds*100)):
+                core.wait(0.01)
+                self.get_status()
         else:
-            status['ready'] = False
-        
-        return status
-    
-    def send(self, cmd: str, param: Any = None) -> str:
-        """Send custom command to Medoc."""
-        if param is not None:
-            full_cmd = f"{cmd} {param}"
-        else:
-            full_cmd = cmd
-        
-        return self._send_command(full_cmd)
-    
-    def close(self):
-        """Close Medoc connection."""
-        if self.socket:
-            try:
-                self.socket.close()
-            except Exception as e:
-                print(f"Warning: Could not close Medoc connection: {e}") 
+            core.wait(seconds)
 
-    def start_program(self, program: str):
-        """Start program."""
-        self.select_tp(program)
-        self.start()
-
-    def stop_program(self, program: str):
-        """Stop program."""
-        self.select_tp(program)
-        self.stop()
     
-    def wait_for_trail_start(self):
-        """Wait for trail start."""
-        if self.dry_run:
-            core.wait(0.5)
-            return
-        while self.get_status()['response'] != "RUNNING":
-            time.sleep(0.01)
-        print("Medoc running")
+    def wait_until_status_is(self, status: str):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Waiting until status is: {status}")
+        response = self.get_status()
+        while response.system_state != status:
+            core.wait(0.01)
+            response = self.get_status()
+            if check_for_escape():
+                self.abort()
+                cp.print_error("Escape key pressed, aborting session")
+                core.quit()
 
-    def wait_for_trail_end(self):
-        """Wait for trail end."""
-        if self.dry_run:
-            core.wait(0.5)
-            return
-        self.wait_for_trail_start()
-        while self.get_status()['response'] != "READY":
-            time.sleep(0.01)
-        print("Medoc ready")
+    def wait_until_test_state_is(self, test_state: str):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Waiting until test state is: {test_state}")
+        response = self.get_status()
+        while response.test_state != test_state:
+            core.wait(0.01)
+            response = self.get_status()
+            if check_for_escape():
+                self.abort()
+                cp.print_error("Escape key pressed, aborting session")
+                core.quit()
+
+    def start_thermal_program(self):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Starting thermal program {self.program}")
+        self.select_tp(self.program) #select the program
+        self.wait(1)
+        self.start() #start pretest
+        self.wait(1)
+        self.start() #start test
+        self.wait(1)
+
+    def set_program(self, program: str):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Setting program to: {program}")
+        self.program = config.medoc_programs.get(program, '00010001')
+
+    def start_threshold_trial(self):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Starting threshold trial")
+        self.trigger()
+
+    def stop_threshold_trial(self, trial_num: int):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Stopping threshold trial {trial_num}")
+        temperature = self.yes().temperature_c #trigger medoc yes to stop trail
+        return temperature
+
+    def skip_initial_pain_stimulus(self):
+        """
+        In the vas search program, the first trail is fixed,
+        so we want to skip it to choose the temperature by the user
+        """
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Skipping initial pain stimulus")
+        self.trigger(log=False)
+        self.wait(1)
+        self.wait_until_test_state_is("READY")
+
+    def pain_stimulus_trial(self, temperature: float):
+        cp.print_warning("[Medoc] [placeholder]", end="")
+        print(f" - Pain stimulus trial at temperature: {temperature}")
+        t_up = temperature - self.last_temp 
+        self.last_temp = temperature
+        self.t_up(t_up)
+        self.wait(0.2)
+        self.trigger()
+        self.wait_until_test_state_is("READY")
+
+def sanity_check():
+    m = Medoc(log=dataRecordHandler.DataRecordHandler(clock=core.Clock(), led=LED.init()))
+    print("== STATUS ==")
+    print(m.get_status())
+    print("\n== SELECT_TP ==")
+    print(m.select_tp('01010101'))
+    print("\n== START ==")
+    print(m.start())
+    time.sleep(7)
+    print("\n== TRIGER ==")
+    print(m.trigger())
+
+if __name__ == '__main__':
+     
+    sanity_check()
