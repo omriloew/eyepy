@@ -11,7 +11,12 @@ medoc_programs = {
     'threshold': '00010001',
     'threshold_demo': '00010001',
     'pain_rating': '00010001',
-    'pain_rating_demo': '00010001',}
+    'pain_rating_demo': '00010001',
+    'cpm': '00010001',
+    'cpm_demo': '00010001',
+    'custom': '00010001',
+    'custom_demo': '00010001',
+}
 medoc_base_temperature = 32.0
 
 # ==============================================
@@ -48,30 +53,40 @@ eeg_port_address = 0x03EFC
 # ==============================================
 # experiment parameters
 # ==============================================
-full_screen = False
-timeout = 100 #8   #skip question if too long in seconds
+full_screen = 0
+timeout = 100 
 is_hebrew = 0
 debug = True
-
+manual_threshold_temperature_data = [40.0, 32.0, 36.0, 44.0, 48.0]
+manual_pain_rating_temperature_data = [40.0, 32.0, 36.0, 44.0, 48.0]
+manual_temperature_data = {
+    'threshold': manual_threshold_temperature_data,
+    'pain_rating': manual_pain_rating_temperature_data,
+}
+desired_ratings = [20, 40, 60]
+each_tmp_rep_num = 4
+break_points_main_session = [5, 10]
+threshold_reduction_factor = 2
+trail_dur_sec = {
+    'main': 15,
+    'cpm': 30
+}
 num_trails = {
     'threshold': 4,
-    'pain_rating': 5,
-    'main': 4,
+    'pain_rating': len(desired_ratings),
+    'main': (len(desired_ratings) + 1) * each_tmp_rep_num,
+    'cpm': 2,
     'custom': 0,
     'threshold_demo': 3,
     'main_demo': 3,
     'pain_rating_demo': 3,
     'custom_demo': 0,
+    'cpm_demo': 3,
 }
-
-manual_temperature_data = [40.0, 32.0, 36.0, 44.0, 48.0]
-manual_rating_data = [40, 0, 20, 60, 80]
-desired_ratings = [0, 20, 40, 60]
 
 # ==============================================
 # VAS (Visual Analog Scale) parameters
 # ==============================================
-vas_show_value = True  # Show the current numeric value while choosing
 vas_max = 100  # Maximum value on the scale
 vas_min = 0  # Minimum value on the scale
 vas_granularity = 1  # Step size for the scale
@@ -105,18 +120,24 @@ ir_csv_prefix = 'IR_'
 # experiment info
 # ==============================================
 participent = 'omri'
+session_number = '1'
 
 exp_name = 'eye pain'
 exp_info = {
     'participant': (participent),
-    'session_number': '',
+    'session_number': (session_number),
     'gender': ('male', 'female', 'other'),
-    'session': ('threshold', 'pain_rating'  , 'main', 'custom'),
+    'session': ('threshold', 'pain_rating' , 'main', 'cpm', 'custom'),
     'age': '',
     'dominant eye': ('right', 'left', 'both'),
     'left-handed': False,
     'demo': False,
 }
+
+# ==============================================
+# post experiment raw process parameters
+# ==============================================
+process_swir = True
 
 # ==============================================
 # event types

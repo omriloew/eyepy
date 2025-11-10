@@ -8,6 +8,8 @@ import coloredPrint as cp
 
 from medockResponse import MedocResponse
 
+print_log = cp.logger("LOG")
+
 class DataRecordHandler:
     """
     Handles recording and logging of experimental data to CSV files.
@@ -61,8 +63,7 @@ class DataRecordHandler:
             self.led.flash()
             self.event(config.led_off_msg)
             core.wait(config.led_interval_in_sec)
-        cp.print_success("[LOG] - ", end="")
-        print(f"Session started: {self.session_type} for participant {self.participant_id}")
+        print_log(f"Session started: {self.session_type} for participant {self.participant_id}")
     
     def load_session_trials_data(self, session_type: str):
         """Load session data from CSV files."""
@@ -70,21 +71,15 @@ class DataRecordHandler:
         output_dir = os.path.join(config.datapath, self.participant_id, str(self.session_number), session_type)
         filepath = os.path.join(output_dir, filename)
         temperature_data = []
-        rating_data = []
         if os.path.exists(filepath):
             with open(filepath, 'r') as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
                     temperature_data.append(row['temperature'])
-                    rating_data.append(row['pain_rating'])
         else:
-            temperature_data = config.manual_temperature_data
-            rating_data = config.manual_rating_data
-        cp.print_success("[LOG] - ", end="")
-        print(f"Loaded temperature data: {temperature_data}")
-        cp.print_success("[LOG] - ", end="")
-        print(f"Loaded rating data: {rating_data}")
-        return temperature_data, rating_data
+            temperature_data = config.manual_temperature_data[session_type]
+        print_log(f"Loaded temperature data: {temperature_data}")
+        return temperature_data
 
     
     def trial(self, trial_number, pain_rating=None, reaction_time=None, 
@@ -112,12 +107,12 @@ class DataRecordHandler:
             'temperature': temperature,
             'wait_time_before_trial': wait_time,
             'trial_duration': trial_duration,
-            'timestamp': datetime.fromtimestamp(timestamp).isoformat(),
             'time_from_session_start': round(time_from_session_start, 6),
             **kwargs
         }
-        cp.print_info("[LOG]", end="")
-        print(f"Trial {trial_number} logged - Rating: {pain_rating}, RT: {reaction_time}")
+        print_log(f"Trial {trial_number} logged")
+        if config.debug:
+            cp.print_debug(f"Trial {trial_number} logged - {trial_entry}")
         self.trial_data.append(trial_entry)
 
     
@@ -143,7 +138,6 @@ class DataRecordHandler:
             '_session_type': self.session_type,
             '_event_code': event_code,
             '_event_message': event_label,
-            '_date_time': datetime.fromtimestamp(timestamp).isoformat(),
             '_temperature': temperature,
         }
         
@@ -152,9 +146,9 @@ class DataRecordHandler:
             event_entry.update(event_data)
         
         self.event_log.append(event_entry)
-        
+        print_log(f"Event {event_type} logged")
         self.eeg.send_trigger(event_code)
-        self.el.send_message(event_label + "_" +str(event_code))
+        self.el.send_message(event_label)
     
     def medoc_event(self, medoc_response: MedocResponse):
         """
@@ -188,19 +182,19 @@ class DataRecordHandler:
             self.led.flash()
             self.event(config.led_off_msg)
             core.wait(config.led_interval_in_sec)
+        print_log(f"Session finished: {self.session_type}")
         self.save_all()
         
         session_duration = self.clock.getTime() - self.session_start_time if self.session_start_time else 0
-        cp.print_success("[LOG] - ", end="")
-        print(f"Session finished: {self.session_type}")
-        print(f"Total duration: {session_duration:.2f} seconds")
-        print(f"Total trials logged: {len(self.trial_data)}")
-        print(f"Total events logged: {len(self.event_log)}")
+        print_log(f"Session finished: {self.session_type}")
+        print_log(f"Total duration: {session_duration:.2f} seconds")
+        print_log(f"Total trials logged: {len(self.trial_data)}")
+        print_log(f"Total events logged: {len(self.event_log)}")
     
     def save_trials(self):
         """Save trial data to CSV file."""
         if not self.trial_data:
-            print("No trial data to save.")
+            cp.print_error("[LOG] - No trial data to save.")
             return
         
         filepath = os.path.join(self.output_dir, self.trials_filename)
@@ -211,14 +205,12 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerows(self.trial_data)
         
-        cp.print_success("[LOG] - ", end="")
-        print(f"Trial data saved to: {filepath}")
+        print_log(f"Trial data saved to: {filepath}")
     
     def save_events(self):
         """Save event log to CSV file."""
         if not self.event_log:
-            cp.print_warning("[LOG] - ", end="")
-            print("No event data to save.")
+            cp.print_error("[LOG] - No event data to save.")
             return
         
         filepath = os.path.join(self.output_dir, self.events_filename)
@@ -229,14 +221,12 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerows(self.event_log)
         
-        cp.print_success("[LOG] - ", end="")
-        print(f"Event data saved to: {filepath}")
+        print_log(f"Event data saved to: {filepath}")
 
     def save_medoc_events(self):
         """Save event log to CSV file."""
         if not self.medoc_event_log:
-            cp.print_warning("[LOG] - ", end="")
-            print("No medoc event data to save.")
+            cp.print_error("[LOG] - No medoc event data to save.")
             return
         
         filepath = os.path.join(self.output_dir, self.medoc_events_filename)
@@ -247,14 +237,12 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerows(self.medoc_event_log)
         
-        cp.print_success("[LOG] - ", end="")
-        print(f"Medoc event data saved to: {filepath}")
+        print_log(f"Medoc event data saved to: {filepath}")
     
     def save_exp_info(self):
         """Save experiment info to both CSV and JSON files."""
         if not self.exp_info:
-            cp.print_warning("[LOG] - ", end="")
-            print("No experiment info to save.")
+            cp.print_error("[LOG] - No experiment info to save.")
             return
         
         # Add timestamp to experiment info
@@ -282,8 +270,7 @@ class DataRecordHandler:
             writer.writeheader()
             writer.writerow(flattened_info)
         
-        cp.print_success("[LOG] - ", end="")
-        print(f"Experiment info (CSV) saved to: {csv_filepath}")
+        print_log(f"Experiment info (CSV) saved to: {csv_filepath}")
         
         # Save as JSON (more readable for complex data)
         json_filename = self.exp_info_filename.replace('.csv', '.json')
@@ -297,8 +284,7 @@ class DataRecordHandler:
         with open(json_filepath, 'w') as jsonfile:
             json.dump(json_data, jsonfile, indent=4, default=str)
         
-        cp.print_success("[LOG] - ", end="")
-        print(f"Experiment info (JSON) saved to: {json_filepath}")
+        print_log(f"Experiment info (JSON) saved to: {json_filepath}")
     
     def save_all(self):
         """Save trial data, event log, and experiment info."""
@@ -332,6 +318,7 @@ class DataRecordHandler:
         """Get a summary of the session data."""
         summary = {
             'participant_id': self.participant_id,
+            'session_number': self.session_number,
             'session_type': self.session_type,
             'total_trials': len(self.trial_data),
             'total_events': len(self.event_log),

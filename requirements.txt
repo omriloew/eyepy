@@ -13,3 +13,5 @@ scikit-learn>=1.0.0
 # Optional packages (install if needed)
 # screeninfo>=0.8.0
 # seaborn>=0.11.0
+mne>=1.8.0  # For standard EDF/EDF+ file handling (EEG data)
+eyelinkio>=0.3.0  # For Eyelink EDF file handling (eye tracking data)
