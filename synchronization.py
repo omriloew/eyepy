@@ -140,14 +140,6 @@ def _pool_into_reference_df(reference_df: pd.DataFrame, device_df: pd.DataFrame,
 
     return reference_df
 
-def _pool_events_into_reference_df(reference_df: pd.DataFrame, device_df: pd.DataFrame) -> pd.DataFrame:
-    events = np.array(_extract_event_series(device_df))
-    for device_time, device_event in zip(device_times, device_events[:, 1]):
-        nearest_reference_event_time = np.argmin(np.abs(reference_times - device_time))
-        nearest_reference_event = reference_events[nearest_reference_event_time, 1]
-        reference_df.loc[nearest_reference_event, EVENT_COL] = f"{nearest_reference_event}; {device_event}"
-    return reference_df
-
 def synchronize_to_reference(reference_name: str, devices: Dict[str, pd.DataFrame], df_E: pd.DataFrame, window_ms: float = 5.0) -> Tuple[pd.DataFrame, Dict[str, Tuple[float, float]]]:
     affine_transformations = get_affine_mapping(reference_name=reference_name, devices=devices, df_E=df_E)
     
