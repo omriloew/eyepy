@@ -5,6 +5,10 @@ from psychopy import core
 import config
 import coloredPrint as cp
 
+if config.exp_info['demo'] or not config.led_on:
+    print_led_log = cp.logger("LED", place_holder=True)
+else:
+    print_led_log = cp.logger("LED")
 
 def init():
     if not config.led_on or config.exp_info['demo']:
@@ -15,16 +19,14 @@ class LED:
     """LED functionality."""
     
     def __init__(self):
-        self.port_name = list_ports.comports()[0].device
+        self.port_name = 'COM5'
         self.baud_rate = config.led_baud_rate
         self.timeout = config.led_timeout
         self.on_duration_in_sec = config.led_on_duration_in_sec
-        cp.print_success("[LED]", end="")
-        print(" - Initialized")
+        print_led_log("Initialized")
 
     def flash(self):
-        cp.print_info("[LED]", end="")
-        print(" - Flashing")
+        print_led_log("Flashing")
         ser = serial.Serial(self.port_name, self.baud_rate, timeout=self.timeout)
         for _ in range(self.on_duration_in_sec):
             ser.writelines(b'H')  # send a byte
@@ -32,8 +34,7 @@ class LED:
             ser.writelines(b'L')  # send a byte
             core.wait(0.5)
         ser.close()
-        cp.print_success("[LED]", end="")
-        print(" - Flashing complete")
+        print_led_log("Flashing complete")
 
 
 class LEDplaceholder:
@@ -41,12 +42,9 @@ class LEDplaceholder:
     
     def __init__(self):
         self.on_duration_in_sec = config.led_on_duration_in_sec
-        cp.print_warning("[LED] [placeholder]", end="")
-        print(" - Initialized")
+        print_led_log("Initialized as placeholder")
 
     def flash(self):
-        cp.print_warning("[LED] [placeholder]", end="")
-        print(" - Flashing")
+        print_led_log("Flashing")
         core.wait(self.on_duration_in_sec)
-        cp.print_warning("[LED] [placeholder]", end="")
-        print(" - Flashing complete")
+        print_led_log("Flashing complete")

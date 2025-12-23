@@ -5,7 +5,7 @@ from typing import Dict, Tuple, List
 
 EVENT_COL = "event_label"
 TIME_COL  = "time_stamp"
-FRAME_COL = "frame_index"  # קיים רק ב-IR (אם אין, אל חובה)
+FRAME_COL = "frame_index"
 
 class SyncError(Exception):
     pass
@@ -20,319 +20,177 @@ def _get_discrete_cols(df: pd.DataFrame, exclude: List[str]) -> List[str]:
     exclude_set = set(exclude)
     return [c for c in df.columns if c not in exclude_set and c.startswith('_')]
 
-def _nearest_discrete_values_at_times(device_times_ir: np.ndarray,
-                                    device_vals: pd.DataFrame,
-                                    query_times_ir: np.ndarray,
-                                    window_ms: float) -> pd.DataFrame:
-    """
-    Find discrete values at query times within a time window.
-    For discrete columns (starting with _), we find values within window_ms of the query time.
-    If no value exists within the window, returns NaN.
-    """
-    # Sort by time for efficiency
-    order = np.argsort(device_times_ir)
-    dt = device_times_ir[order]
-    vals = device_vals.iloc[order].copy()
-    
-    # Create helper DataFrame with time and values
-    helper = pd.DataFrame({TIME_COL: dt})
-    for c in device_vals.columns:
-        helper[c] = vals[c].values
-    
-    # Convert window_ms to seconds
-    window_sec = window_ms / 1000.0
-    
-    # Initialize result DataFrame with NaN values
-    discrete_cols = [c for c in device_vals.columns if c.startswith('_')]
-    result = pd.DataFrame(index=range(len(query_times_ir)), columns=discrete_cols)
-    result[:] = np.nan
-    
-    # For each query time, find values within the window
-    for i, query_time in enumerate(query_times_ir):
-        # Find all device times within the window
-        time_diff = np.abs(dt - query_time)
-        within_window = time_diff <= window_sec
-        
-        if np.any(within_window):
-            # Find the closest time within the window
-            closest_idx = np.argmin(time_diff[within_window])
-            actual_idx = np.where(within_window)[0][closest_idx]
-            
-            # Set the discrete values for this query time
-            for col in discrete_cols:
-                result.iloc[i, result.columns.get_loc(col)] = helper.iloc[actual_idx][col]
-    
-    return result
-
-def _extract_event_series(df: pd.DataFrame) -> pd.DataFrame:
-    """מחזיר רק אירועים (label+time), ממויין בזמן, בלי NaN בלייבל."""
-    ev = df[[TIME_COL, EVENT_COL]].dropna(subset=[EVENT_COL]).copy()
-    ev = ev.sort_values(TIME_COL).reset_index(drop=True)
-    return ev
-
-def _align_events_to_E(device_events: pd.DataFrame, E_events: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    מייצר יישור לפי הסדר הכרונולוגי הגלובלי של E:
-    עוברים על אירועי E לפי זמן; לכל label סופרים את ההופעה ה-k;
-    מהמכשיר לוקחים את ההופעה ה-k של אותו label (אם קיימת) ושומרים זוג זמנים.
-    מאפשר חזרות כמו A B A D בלי לשבור מונוטוניות גלובלית.
-    """
-    if device_events.empty:
-        raise SyncError("אין אירועים בטבלה — נדרש לפחות שני עוגנים.")
-
-    # מיון מראש
-    dev = device_events.sort_values(TIME_COL).reset_index(drop=True)
-    Eev = E_events.sort_values(TIME_COL).reset_index(drop=True)
-
-    # אינדקסים של ההופעה ה-k לכל label בכל צד
-    # מכשיר: רשימת זמנים לכל label
-    dev_by_label = {}
-    for lab, g in dev.groupby(EVENT_COL):
-        dev_by_label[lab] = g[TIME_COL].to_list()
-
-    # מונה הופעות שכבר נצרכו מכל label
-    counters = {lab: 0 for lab in dev_by_label.keys()}
-
-    t_dev_list = []
-    t_E_list   = []
-
-    # סריקה כרונולוגית של E
-    for _, row in Eev.iterrows():
-        lab = row[EVENT_COL]
-        tE  = float(row[TIME_COL])
-
-        # אם label זה לא קיים במכשיר — מדלגים (המכשיר לא רשם את האירוע הזה)
-        if lab not in dev_by_label:
-            continue
-
-        k = counters[lab]
-        # אם למכשיר יש עוד הופעה עבור label זה — נצרף; אחרת דילול (המכשיר סיים את כל ההופעות שלו עבור label זה)
-        if k < len(dev_by_label[lab]):
-            tD = float(dev_by_label[lab][k])
-            t_dev_list.append(tD)
-            t_E_list.append(tE)
-            counters[lab] += 1
-        # אם לא — ממשיכים הלאה (אין שגיאה: המכשיר יכול להכיל תת־קבוצה של E)
-
-    if len(t_dev_list) < 2:
-        raise SyncError("נדרשים לפחות שני עוגנים משותפים (במצטבר) ליצירת התאמה.")
-
-    t_dev = np.array(t_dev_list, dtype=float)
-    t_E   = np.array(t_E_list,   dtype=float)
-
-    # בדיקת מונוטוניות גלובלית אחרי היישור (אמורה להחזיק מעצם הסריקה לפי E)
-    if not (np.all(np.diff(t_dev) >= 0) and np.all(np.diff(t_E) >= 0)):
-        raise SyncError("זוהתה חריגה במונוטוניות העוגנים לאחר יישור כרונולוגי.")
-
-    return t_dev, t_E
-
 
 def _fit_affine(x: np.ndarray, y: np.ndarray) -> Tuple[float, float]:
-    """
-    מתאים y ≈ a*x + b. אם יש בדיוק 2 נקודות — פתרון סגור; אחרת LS.
-    """
+    """Fit y = a*x + b using least squares."""
     if x.size == 2:
         dx = x[1] - x[0]
         if dx == 0:
-            raise SyncError("עוגנים זהים בזמן המכשיר — אי אפשר להתאים אפינית.")
+            raise SyncError("Identical device times - cannot fit affine transformation.")
         a = (y[1] - y[0]) / dx
         b = y[0] - a * x[0]
         return float(a), float(b)
-    # LS
+    
+    # Least squares
     A = np.vstack([x, np.ones_like(x)]).T
     a, b = np.linalg.lstsq(A, y, rcond=None)[0]
     return float(a), float(b)
 
-def _fit_device_to_E(df_device: pd.DataFrame, df_E: pd.DataFrame) -> Tuple[float, float]:
-    dev_ev = _extract_event_series(df_device)
-    E_ev   = _extract_event_series(df_E)
-    x, y   = _align_events_to_E(dev_ev, E_ev)
-    a, b   = _fit_affine(x, y)
-    # אימות: שמירה על סדר אחרי המיפוי
-    mapped = a * x + b
-    if not np.all(np.diff(mapped) > 0):
-        raise SyncError("התאמה אפינית גורמת לפגיעה במונוטוניות (a<=0?).")
+def _extract_event_series(df: pd.DataFrame) -> List[Tuple[float, str]]:
+    events = []
+    for _, row in df.iterrows():
+        event_label = str(row[EVENT_COL]).strip()
+        if event_label and not pd.isna(event_label) and event_label != '' and event_label != 'nan':
+            events.append((float(row[TIME_COL]), event_label))
+    events = sorted(events, key=lambda x: x[0])
+    print("--------------------------------")
+    print(events)
+    return events
+
+def calculate_affine_transformations(df_device: pd.DataFrame, E_events: List[Tuple[float, str]]) -> Tuple[float, float]:
+    """
+    Calculate affine transformation from device time to E time.
+    """
+    device_events = _extract_event_series(df_device)
+    if len(device_events) < 2:
+        raise SyncError(f"Device has less than 2 events.")
+    x = [device_event[0] for device_event in device_events]
+    y = []
+    curr_E_idx = 0
+    for device_event in device_events:
+        while device_event[1] != E_events[curr_E_idx][1]:
+            curr_E_idx += 1
+            if curr_E_idx >= len(E_events):
+                raise SyncError(f"Device event {device_event[1]} not found in E events.")
+        y.append(E_events[curr_E_idx][0])
+        curr_E_idx += 1
+    a, b = _fit_affine(np.array(x), np.array(y))
     return a, b
 
-def _compose_device_to_IR(ab_devE: Tuple[float,float], ab_irE: Tuple[float,float]) -> Tuple[float,float]:
+def get_affine_mapping(reference_name: str, devices: Dict[str, pd.DataFrame], df_E: pd.DataFrame) -> Dict[str, Tuple[float, float]]:
     """
-    אם t_E = a_dev * t_dev + b_dev  וגם  t_E = a_ir * t_ir + b_ir
-    אז t_ir = (t_E - b_ir) / a_ir = (a_dev/a_ir) * t_dev + (b_dev - b_ir)/a_ir
+    Synchronize multiple device dataframes to a reference timeline.
     """
-    a_dev, b_dev = ab_devE
-    a_ir,  b_ir  = ab_irE
-    if a_ir == 0:
-        raise SyncError("a_ir==0 בלתי אפשרי.")
-    a = a_dev / a_ir
-    b = (b_dev - b_ir) / a_ir
-    if a <= 0:
-        raise SyncError("התוצאה גורמת לשיפוע לא חיובי (a<=0) במיפוי למרחב IR.")
-    return float(a), float(b)
+    E_events = _extract_event_series(df_E)
+    affine_transformations = {}
+    for device_name, device_df in devices.items():
+        a, b = calculate_affine_transformations(device_df, E_events)
+        affine_transformations[device_name] = (a, b)
 
-def _windowed_average_at_times(device_times_ir: np.ndarray,
-                               device_vals: pd.DataFrame,
-                               query_times_ir: np.ndarray,
-                               window_ms: float) -> pd.DataFrame:
-    """
-    ממוצע בכל חלון [t - w, t + w] סביב כל זמן IR.
-    מימוש וקטורי: מצטברים + שני merge_asof כדי להביא סכום/ספירה בקצוות.
-    """
-    # לבטיחות: מיון עולה
-    order = np.argsort(device_times_ir)
-    dt = device_times_ir[order]
-    vals = device_vals.iloc[order].copy()
-
-    # נכין מצטברים לעמודות נומריות
-    num_cols = vals.columns.tolist()
-    # מחליפים אינפים/NaN כראוי לספירה
-    mask = ~vals[num_cols].isna()
-
-    csum = vals[num_cols].fillna(0).cumsum()
-    ccnt = mask.astype(np.int64).cumsum()
-
-    # יוצרים DF עזר עם זמן+מצטברים
-    helper = pd.DataFrame({TIME_COL: dt})
-    for c in num_cols:
-        helper[f"sum__{c}"] = csum[c].to_numpy()
-        helper[f"cnt__{c}"] = ccnt[c].to_numpy()
-
-    # קצוות החלון לכל t_q
-    left_q  = pd.DataFrame({TIME_COL: query_times_ir - window_ms})
-    right_q = pd.DataFrame({TIME_COL: query_times_ir + window_ms})
-
-    # asof: לוקחים את השורה האחרונה שהזמן שלה <= גבול
-    left  = pd.merge_asof(left_q,  helper, on=TIME_COL, direction="backward")
-    right = pd.merge_asof(right_q, helper, on=TIME_COL, direction="backward")
-
-    out = {}
-    for c in num_cols:
-        s_right = right[f"sum__{c}"]
-        s_left  = left[f"sum__{c}"].fillna(0)
-        n_right = right[f"cnt__{c}"]
-        n_left  = left[f"cnt__{c}"].fillna(0)
-
-        num = s_right - s_left
-        den = n_right - n_left
-        with np.errstate(invalid='ignore', divide='ignore'):
-            avg = num / den
-        avg[den == 0] = np.nan
-        out[c] = avg.to_numpy()
-
-    return pd.DataFrame(out)
-
-def synchronize_to_SWIR(
-    df_SWIR: pd.DataFrame,
-    devices: Dict[str, pd.DataFrame],  # {"VC": df_vc, "EEG": df_eeg, "MD": df_md, ... (אפשר לכלול גם "IR": df_IR אך אין צורך)}
-    df_E: pd.DataFrame,
-    window_ms: float = 5.0
-) -> Tuple[pd.DataFrame, Dict[str, Tuple[float,float]]]:
-    """
-    Synchronize multiple device data to SWIR timeline.
-    
-    Features:
-    - Ignores non-numeric columns automatically
-    - Discrete columns (starting with _) use nearest-neighbor matching within time window
-    - Numeric columns use windowed averaging for smooth interpolation
-    
-    Parameters:
-    - df_SWIR: Reference timeline (SWIR data)
-    - devices: Dictionary of device DataFrames
-    - df_E: Event timeline for synchronization
-    - window_ms: Window size in milliseconds for numeric column averaging
-    
-    Returns:
-      - DataFrame synchronized to SWIR timeline (preserves original SWIR columns + averaged device columns with prefixes)
-      - dict with mapping parameters for tracking: {"IR->E": (a,b), "VC->E": (a,b), ..., "VC->IR": (a,b), ...}
-    """
-    # בדיקות בסיס
-    for name, df in [("SWIR", df_SWIR), ("E", df_E), *devices.items()]:
-        if TIME_COL not in df.columns or EVENT_COL not in df.columns:
-            raise SyncError(f"{name}: חסרות עמודות חובה '{TIME_COL}' או '{EVENT_COL}'.")
-
-    # התאמות אפיניות ל-E
-    devices["EVENTS"] = df_E
-    a_SWIR_E, b_SWIR_E = _fit_device_to_E(df_SWIR, df_E)
-    mappings = {"SWIR->E": (a_SWIR_E, b_SWIR_E)}
-
-    device_to_IR_map: Dict[str, Tuple[float,float]] = {}
-
-    # ציר הייחוס של IR
-    swir_times = df_SWIR[TIME_COL].to_numpy(dtype=float)
-
-    # נתחיל את פלט עם עותק של IR (לא פוגעים במקור)
-    out = df_SWIR.copy()
-
-    # עבור כל מכשיר: התאמת dev->E, הרכבת dev->IR, ממוצע חלון והוספה ל-out
-    for dev_name, df_dev in devices.items():
-        a_dev_E, b_dev_E = _fit_device_to_E(df_dev, df_E)
-        mappings[f"{dev_name}->E"] = (a_dev_E, b_dev_E)
-
-        a_dev_SWIR, b_dev_SWIR = _compose_device_to_IR((a_dev_E, b_dev_E), (a_SWIR_E, b_SWIR_E))
-        device_to_IR_map[dev_name] = (a_dev_SWIR, b_dev_SWIR)
-        mappings[f"{dev_name}->SWIR"] = (a_dev_SWIR, b_dev_SWIR)
-
-        # ממפים את כל הזמנים של המכשיר לציר IR
-        t_dev = df_dev[TIME_COL].to_numpy(dtype=float)
-        t_swir_mapped = a_dev_SWIR * t_dev + b_dev_SWIR
-
-        # עמודות דאטה נומריות (עם window pooling)
-        numeric_cols = _get_numeric_data_cols(df_dev, exclude=[TIME_COL, EVENT_COL])
-        discrete_cols = _get_discrete_cols(df_dev, exclude=[TIME_COL, EVENT_COL])
-        
-        if not numeric_cols and not discrete_cols:
-            # אין עמודות דאטה — מדלגים
+    a_ref_to_E,b_ref_to_E = affine_transformations[reference_name]
+    for device_name, device_df in devices.items():
+        if device_name == reference_name:
+            a_E_to_ref = 1/a_ref_to_E
+            b_E_to_ref = -b_ref_to_E / a_ref_to_E
+            affine_transformations[device_name] = (a_E_to_ref, b_E_to_ref)
             continue
-        
-        result_dfs = []
-        
-        # Handle numeric columns with window pooling
-        if numeric_cols:
-            dev_vals_numeric = df_dev[numeric_cols] 
-            # ממוצע חלון יעיל סביב כל זמן IR
-            avg_df = _windowed_average_at_times(t_swir_mapped, dev_vals_numeric, swir_times, window_ms)
-            # קידומת שם המכשיר
-            avg_df.columns = [f"{dev_name}__{c}" for c in avg_df.columns]
-            result_dfs.append(avg_df)
-        
-        # Handle discrete columns with time window constraint
-        if discrete_cols:
-            dev_vals_discrete = df_dev[discrete_cols]
-            # מציאת הערכים הקרובים ביותר בתוך חלון זמן
-            discrete_df = _nearest_discrete_values_at_times(t_swir_mapped, dev_vals_discrete, swir_times, window_ms)
-            # קידומת שם המכשיר
-            discrete_df.columns = [f"{dev_name}__{c}" for c in discrete_df.columns]
-            result_dfs.append(discrete_df)
-        
-        # Combine all results for this device
-        if result_dfs:
-            device_result = pd.concat(result_dfs, axis=1)
-            # מיזוג לפי אינדקס (אותו סדר כמו df_IR)
-            out = pd.concat([out.reset_index(drop=True), device_result.reset_index(drop=True)], axis=1)
+        a_dev_to_E, b_dev_to_E = affine_transformations[device_name]
+        a_dev_to_ref = a_dev_to_E / a_ref_to_E
+        b_dev_to_ref = (b_dev_to_E - b_ref_to_E) / a_ref_to_E
+        affine_transformations[device_name] = (a_dev_to_ref, b_dev_to_ref)
+    return affine_transformations
 
-    return out, mappings
+def _extract_vals(df: pd.DataFrame, col: str):
+    vals = df[col].dropna().to_numpy()
+    times = df[TIME_COL][df[col].notna()].to_numpy(dtype=float)
+    return zip(times, vals)
+
+def _pool_discrete_col(reference_df: pd.DataFrame, device_df: pd.DataFrame, col: str, window_ms: float = 5.0) -> pd.DataFrame:
+    device_vals_and_times = _extract_vals(device_df, col)
+    reference_times = reference_df[TIME_COL].to_numpy(dtype=float)  
+    window_sec = window_ms / 1000.0
+    for time, val in device_vals_and_times:
+        nearest_reference_time = np.argmin(np.abs(reference_times - time))
+        if np.abs(reference_times[nearest_reference_time] - time) <= window_sec:
+            reference_df.loc[nearest_reference_time, col] = val
+        else:
+            reference_df.loc[nearest_reference_time, col] = np.nan
+    return reference_df
+
+def _pool_numeric_col(reference_df: pd.DataFrame, device_df: pd.DataFrame, col: str, window_ms: float = 5.0) -> pd.DataFrame:
+    device_times = device_df[TIME_COL].to_numpy(dtype=float)
+    reference_times = reference_df[TIME_COL].to_numpy(dtype=float)
+    window_sec = window_ms / 1000.0
+    for reference_time in reference_times:
+        times_in_window = device_times[np.abs(device_times - reference_time) <= window_sec]
+        vals_in_window = device_df.loc[device_df[TIME_COL].isin(times_in_window), col].to_numpy(dtype=float)
+        if len(vals_in_window) > 0:
+            reference_df.loc[reference_df[TIME_COL] == reference_time, col] = np.mean(vals_in_window)
+    return reference_df
+
+def _pool_events(reference_df: pd.DataFrame, device_df: pd.DataFrame) -> pd.DataFrame:
+    device_events = np.array(_extract_event_series(device_df))
+    reference_events = np.array(_extract_event_series(reference_df))
+    device_times = device_events[:, 0].astype(float)
+    reference_times = reference_events[:, 0].astype(float)
+    for device_time, device_event in zip(device_times, device_events[:, 1]):
+        nearest_reference_event_time = np.argmin(np.abs(reference_times - device_time))
+        nearest_reference_event = reference_events[nearest_reference_event_time, 1]
+        reference_df.loc[nearest_reference_event, EVENT_COL] = f"{nearest_reference_event}; {device_event}"
+    return reference_df
+
+def _pool_into_reference_df(reference_df: pd.DataFrame, device_df: pd.DataFrame, window_ms: float = 5.0) -> pd.DataFrame:
+    discrete_cols = _get_discrete_cols(device_df, exclude=[TIME_COL, EVENT_COL])
+    numeric_cols = _get_numeric_data_cols(device_df, exclude=[TIME_COL, EVENT_COL])
+    for col in discrete_cols:
+        _pool_discrete_col(reference_df, device_df, col, window_ms)
+    for col in numeric_cols:
+        _pool_numeric_col(reference_df, device_df, col, window_ms)
+    _pool_discrete_col(reference_df, device_df, col="event_label", window_ms=window_ms)
+
+    return reference_df
+
+def synchronize_to_reference(reference_name: str, devices: Dict[str, pd.DataFrame], df_E: pd.DataFrame, window_ms: float = 5.0) -> Tuple[pd.DataFrame, Dict[str, Tuple[float, float]]]:
+    affine_transformations = get_affine_mapping(reference_name=reference_name, devices=devices, df_E=df_E)
+    
+    for device_name, device_df in devices.items():
+        if device_name == reference_name:
+            continue
+        a_dev_to_ref, b_dev_to_ref = affine_transformations[device_name]
+        device_df[TIME_COL] = a_dev_to_ref * device_df[TIME_COL] + b_dev_to_ref
+        _extract_event_series(device_df)
+
+    out = devices[reference_name].copy()
+
+    a_E_to_ref, b_E_to_ref = affine_transformations[reference_name]
+    df_E[TIME_COL] = a_E_to_ref * df_E[TIME_COL] + b_E_to_ref
+
+    for device_name, device_df in devices.items():
+        if device_name == reference_name:
+            continue
+        _pool_into_reference_df(out, device_df, window_ms)
+
+    _pool_into_reference_df(out, df_E, window_ms)
+    _pool_discrete_col(out, df_E, col="event_label", window_ms=window_ms)
+
+    for device_name, device_df in devices.items():
+        device_df.to_csv(f"synced_{device_name}.csv", index=False)
+    df_E.to_csv("synced_E.csv", index=False)
+    out.to_csv("synced_reference.csv", index=False)
+    return out, affine_transformations
+
 
 def main():
-    df_E   = pd.read_csv("rawResultsExample/E.csv")
-    df_SWIR  = pd.read_csv("rawResultsExample/SWIR.csv")
-    df_VC  = pd.read_csv("rawResultsExample/VC.csv")
+    df_E = pd.read_csv("rawResultsExample/E.csv")
+    df_SWIR = pd.read_csv("rawResultsExample/IR.csv")
+    df_VC = pd.read_csv("rawResultsExample/VC.csv")
     df_EL = pd.read_csv("rawResultsExample/EL.csv")
-    df_MD  = pd.read_csv("rawResultsExample/MD.csv")
+    df_MD = pd.read_csv("rawResultsExample/MD.csv")
     devices = {
         "VC": df_VC,
         "EL": df_EL,
         "MD": df_MD,
+        "SWIR": df_SWIR,
     }
-
-
-    synced_df, mappings = synchronize_to_SWIR(
-        df_SWIR=df_SWIR,
+    
+    synced_df, mappings = synchronize_to_reference(
+        reference_name="SWIR",
         devices=devices,
         df_E=df_E,
-        window_ms=5.0  # אפשר לשנות: 2.0/10.0 לפי רזולוציה ונויז
+        window_ms=5.0
     )
-
-    # לשמור לקובץ:
-    synced_df.to_csv("synced_to_SWIR.csv", index=False)
+    
+    synced_df.to_csv("synced_to_reference.csv", index=False)
     print("Mappings:", mappings)
 
 if __name__ == "__main__":
