@@ -8,40 +8,34 @@ import config as config
 import edfHandler as edf
 
 always_keep_cols = ['time_stamp', 'event_label'] #DO NOT CHANGE THIS
-is_manual = {}
 #===============================================
 # events configuration
 #===============================================
-events_csv_path_manual = 'rawFilesToTestWith/events.csv'
-is_manual['EVENTS'] = False
+events_csv_path = 'plr/omri_plr_events.csv'
 keep_events_cols = ['_event_code']
 #===============================================
 # swir configuration
 #===============================================
-process_swir = False
-swir_avi_file_path_manual = 'rawFilesToTestWith/1-9_M_30exp.avi'
-is_manual['SWIR'] = True
+process_swir = True
+swir_avi_file_path = 'plr/output.avi'
 keep_swir_cols = ['event_label']
 #===============================================
 # medoc configuration
 #===============================================
-process_medoc = True
-medoc_csv_path_manual = 'rawFilesToTestWith/medoc_events.csv'
-is_manual['MEDOC'] = False
+process_medoc = False
+medoc_csv_path = 'plr/omri_plr_medoc_events.csv'
 keep_medoc_cols = ['temperature_c']
 #===============================================
 # eeg configuration
 #===============================================
 process_eeg = False
-eeg_file_path_manual = 'rawFilesToTestWith/STM_Visualization_Clean_v2_EN.ipynb.edf'
-is_manual['EEG'] = True
+eeg_file_path = 'rawFilesToTestWith/STM_Visualization_Clean_v2_EN.ipynb.edf'
 keep_eeg_cols = []
 #===============================================
 # eyelink configuration 
 #===============================================
-process_eyelink = False
-eyelink_file_path_manual = 'rawFilesToTestWith/1011b4c2.edf'
-is_manual['EL'] = True
+process_eyelink = True
+eyelink_file_path = 'plr/test.edf'
 keep_eyelink_cols = ['xpos', 'ypos', 'ps']
 #===============================================
 # output configuration
@@ -58,6 +52,10 @@ session_number = '1'
 # synchronization configuration
 #===============================================
 sychronize_to = 'SWIR'
+#===============================================
+# visualization configuration
+#===============================================
+columns_to_exclude_from_plot = ['frame_index']  # Columns to exclude from final visualization
 
 
 def configure_output_paths():
@@ -69,41 +67,13 @@ def configure_output_paths():
     if not os.path.exists(session_output_dir):
         os.makedirs(session_output_dir)
     else:
-        raise Exception(f"Session output directory already exists: {session_output_dir}")
+        cp.colored_print(f"Warning: Session output directory already exists: {session_output_dir}. Will overwrite existing files.", color=cp.Fore.YELLOW)
     
     output_csv_sufix = f'{participant_id}_{session_type}_{session_number}.csv'
 
     return session_output_dir, output_csv_sufix
 
 def configure_input_paths():
-
-    if not is_manual['EEG']:
-        eeg_file_name = f'{config.eyelink_edf_prefix}{participant_id}_{session_type}_{session_number}.edf'
-        eeg_file_path = f'log_files/{participant_id}/{session_number}/{session_type}/{eeg_file_name}'
-    else:
-        eeg_file_path = eeg_file_path_manual
-
-    if not is_manual['EL']:
-        eyelink_file_name = f'{config.eyelink_edf_prefix}{participant_id}_{session_type}_{session_number}.edf'
-        eyelink_file_path = f'log_files/{participant_id}/{session_number}/{session_type}/{eyelink_file_name}'
-    else:
-        eyelink_file_path = eyelink_file_path_manual
-    
-    if not is_manual['MEDOC']:
-         medoc_csv_path = f'log_files/{participant_id}/{session_number}/{session_type}/{participant_id}_{session_type}_medoc_events.csv'
-    else:
-        medoc_csv_path = medoc_csv_path_manual
-
-    if not is_manual['SWIR']:
-        swir_avi_file_path = f'log_files/{participant_id}/{session_number}/{session_type}/{participant_id}_{session_type}_swir.avi'
-    else:
-        swir_avi_file_path = swir_avi_file_path_manual
-
-    if not is_manual['EVENTS']:
-        events_csv_path = f'log_files/{participant_id}/{session_number}/{session_type}/{participant_id}_{session_type}_events.csv'
-    else:
-        events_csv_path = events_csv_path_manual
-
     return events_csv_path, medoc_csv_path, eeg_file_path, eyelink_file_path, swir_avi_file_path
 
 def swir_avi_to_df(session_output_dir=None, output_csv_sufix=None, swir_avi_file_path=None):
@@ -142,13 +112,23 @@ def swir_avi_to_df(session_output_dir=None, output_csv_sufix=None, swir_avi_file
     print("================================================")
     return swir_df
 
-def get_eyelink_df(eyelink_file_path):
+def get_eyelink_df(eyelink_file_path, session_output_dir=None, output_csv_sufix=None):
     print("================================================")
     cp.colored_print("== Converting EYE LINK EDF to DataFrame ==", color=cp.Fore.CYAN)
     df = edf.edf_to_df(eyelink_file_path)
     keep_cols = always_keep_cols + keep_eyelink_cols
     df = df[keep_cols]
     cp.colored_print(f"EyeLink DataFrame: {df.head()}", color=cp.Fore.BLUE)
+    # Save the CSV if output directory is provided
+    if session_output_dir and output_csv_sufix:
+        save_path = f'{session_output_dir}/eyelink_{output_csv_sufix}'
+        df.to_csv(save_path, index=False)
+        cp.colored_print(f"saved file: {save_path}", color=cp.Fore.BLUE)
+        
+        # Visualize the raw Eyelink data
+        plot_save_path = f'{session_output_dir}/eyelink_raw_plot_{output_csv_sufix}'.replace('.csv', '.png')
+        plot_df_in_time(df, columns_to_plot=['xpos', 'ypos', 'ps'], df_name="EYELINK RAW", save_path=plot_save_path)
+        cp.colored_print(f"Raw Eyelink plot saved to: {plot_save_path}", color=cp.Fore.BLUE)
     print("================================================")
     return df
 
@@ -209,7 +189,7 @@ def print_def_columns_and_unique_values(df, df_name="DATAFRAME"):
             print("...(truncated)...")
         print("------")
 
-def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRAME"):
+def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRAME", save_path=None):
     """
     Plots specified columns against time on a single graph.
     
@@ -218,6 +198,7 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRA
         columns_to_plot: List of column names to plot
         scale_factors: Dict mapping column name -> float factor to scale the values
         df_name: Name for the plot title
+        save_path: Optional path to save the plot as PNG (if None, shows the plot)
     
     Behavior:
         - Always plots time_stamp on x-axis
@@ -315,6 +296,11 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRA
     
     plt.tight_layout()
     plt.show()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: {save_path}")
+    else:
+        plt.show()
 
 def main():
     # Configure paths
@@ -325,7 +311,7 @@ def main():
         swir_df = swir_avi_to_df(session_output_dir, output_csv_sufix, swir_avi_file_path)
         devices["SWIR"] = swir_df
     if process_eyelink:
-        eyelink_df = get_eyelink_df(eyelink_file_path)
+        eyelink_df = get_eyelink_df(eyelink_file_path, session_output_dir, output_csv_sufix)
         devices["EL"] = eyelink_df
     if process_eeg:
         eeg_df = get_eeg_df(eeg_file_path)
@@ -335,8 +321,6 @@ def main():
         devices["MEDOC"] = medoc_df
 
     events_df = get_events_df(events_csv_path)
-    swir_df = pd.read_csv('post_exp_raw_process_results/002/main/swir_002_main.csv')
-    devices["SWIR"] = swir_df
 
     synced_df, mappings = sync.synchronize_to_reference(
         reference_name=sychronize_to,
@@ -345,8 +329,41 @@ def main():
         window_ms=30.0
     )
 
-    synced_df.to_csv(f'{session_output_dir}/synced_{sychronize_to}_{output_csv_sufix}', index=False)
-    print(f"Synced data saved to: {f'{session_output_dir}/synced_{sychronize_to}_{output_csv_sufix}'}")
+    # Save each individual device's synced DataFrame
+    for device_name, device_df in devices.items():
+        save_path = f'{session_output_dir}/synced_{device_name}_{output_csv_sufix}'
+        device_df.to_csv(save_path, index=False)
+        cp.colored_print(f"Synced {device_name} saved to: {save_path}", color=cp.Fore.BLUE)
+    
+    # Save synced events DataFrame
+    events_save_path = f'{session_output_dir}/synced_events_{output_csv_sufix}'
+    events_df.to_csv(events_save_path, index=False)
+    cp.colored_print(f"Synced events saved to: {events_save_path}", color=cp.Fore.BLUE)
+    
+    # Save the final combined synced result (all devices pooled together)
+    final_synced_path = f'{session_output_dir}/synced_combined_{output_csv_sufix}'
+    synced_df.to_csv(final_synced_path, index=False)
+    cp.colored_print(f"Final combined synced data saved to: {final_synced_path}", color=cp.Fore.GREEN)
+    
+    # Visualize the final combined synced result
+    # Get all numeric columns (excluding time_stamp, event_label, and configured exclusions) for plotting
+    exclude_cols = ['time_stamp', 'event_label'] + columns_to_exclude_from_plot
+    numeric_cols = [col for col in synced_df.columns 
+                    if col not in exclude_cols 
+                    and synced_df[col].dtype in ['float64', 'int64', 'float32', 'int32']]
+    
+    # Limit to reasonable number of columns for visualization
+    if len(numeric_cols) > 10:
+        # Prioritize common columns
+        priority_cols = ['xpos', 'ypos', 'ps', 'temperature_c']
+        plot_cols = [col for col in priority_cols if col in numeric_cols]
+        plot_cols.extend([col for col in numeric_cols if col not in plot_cols][:10-len(plot_cols)])
+    else:
+        plot_cols = numeric_cols
+    
+    plot_save_path = f'{session_output_dir}/synced_combined_plot_{output_csv_sufix}'.replace('.csv', '.png')
+    plot_df_in_time(synced_df, columns_to_plot=plot_cols, df_name="SYNCED COMBINED", save_path=plot_save_path)
+    
     print(f"Mappings: {mappings}")
 
 
@@ -355,9 +372,9 @@ def test():
     events_df = get_events_df('log_files/omri/1/main/omri_main_events.csv')
     plot_df_in_time(events_df,df_name="EVENTS")
     plot_df_in_time(medoc_df, columns_to_plot=["temperature_c"], df_name="MEDOC")
-    swir_df = swir_avi_to_df(swir_avi_file_path=swir_avi_file_path_manual)
+    swir_df = swir_avi_to_df(swir_avi_file_path=swir_avi_file_path)
     plot_df_in_time(swir_df, df_name="SWIR")
-    eyelink_df = get_eyelink_df(eyelink_file_path_manual)
+    eyelink_df = get_eyelink_df(eyelink_file_path)
     plot_df_in_time(eyelink_df, columns_to_plot=["xpos", "ypos", "ps"], df_name="EYELINK")
     
 

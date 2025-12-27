@@ -163,10 +163,6 @@ def synchronize_to_reference(reference_name: str, devices: Dict[str, pd.DataFram
     _pool_into_reference_df(out, df_E, window_ms)
     _pool_discrete_col(out, df_E, col="event_label", window_ms=window_ms)
 
-    for device_name, device_df in devices.items():
-        device_df.to_csv(f"synced_{device_name}.csv", index=False)
-    df_E.to_csv("synced_E.csv", index=False)
-    out.to_csv("synced_reference.csv", index=False)
     return out, affine_transformations
 
 
@@ -190,7 +186,6 @@ def main():
         window_ms=5.0
     )
     
-    synced_df.to_csv("synced_to_reference.csv", index=False)
     print("Mappings:", mappings)
 
 if __name__ == "__main__":

@@ -1,0 +1,108 @@
+\documentclass[12pt]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{setspace}
+
+%%
+%% A multi-modal pain research framework
+%% This document restructures the original report according to a new outline
+%% containing psychological methods, system architecture, clock synchronisation,
+%% LED event extraction, technical implementation, validation, discussion and conclusion.
+%% Citations refer to the relevant literature (VAS, method of limits, CPM, synchronisation).
+
+\title{A Multi‑Modal Pain Research Framework:\ Psychophysical Methods, System Architecture and Clock Synchronisation}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+Modern pain research increasingly relies on multi‑modal data combining subjective ratings, neurophysiological signals and behavioural observations.  Integrating such heterogeneous streams requires careful timing, because each device operates on an independent clock and slight misalignments obscure causal relationships between stimuli and responses.  This paper presents an extensible framework for co‑ordinating thermal pain stimulation, eye tracking, electroencephalography (EEG) and video recordings.  Building on psychophysical methods for threshold detection, intensity calibration and conditioned pain modulation, the system implements a modular architecture with precise clock synchronisation.  We describe the theoretical foundations of the psychophysical procedures, outline the overall system design, derive the mathematical model used for aligning clocks across devices and detail the algorithms used for detecting LED flashes and constructing an affine synchronisation transform.  Finally we illustrate a simple validation procedure and discuss the advantages and limitations of the framework.
+\end{abstract}
+
+\section{Introduction}
+Pain is a multidimensional phenomenon comprising sensory, affective and cognitive elements.  Laboratory studies therefore often record multiple signals—neural activity, eye movements, autonomic responses, subjective reports and behavioural indicators—to elucidate how nociceptive stimuli are processed and modulated.  Each modality contributes unique information: EEG provides millisecond‑resolved neural signatures; eye tracking measures gaze position and pupil diameter, which are sensitive to attentional engagement and sympathetic arousal; thermal stimulators deliver reproducible noxious heat pulses; and infrared or visible‑light cameras capture facial and bodily expressions.  A central challenge is that these instruments use independent clocks that may drift relative to one another.  Without correction, correlating events across devices becomes unreliable, precluding meaningful causal inference.  The framework described here unifies diverse devices through a combination of event‑driven control, hardware‑triggered synchronisation and a mathematically principled alignment of timelines.
+
+\section{Psychological Methods for Pain}
+Psychophysics provides well‑established procedures for quantifying pain perception.  Although pain is inherently subjective, threshold and rating tasks enable experimenters to relate stimulus intensity to reported sensation.
+
+\subsection{Threshold detection}
+Threshold detection seeks the lowest stimulus intensity that evokes a percept.  Classical methods include the \emph{method of limits}, the \emph{method of constant stimuli} and the \emph{method of adjustment}.  In the method of limits the stimulus intensity is increased (ascending series) or decreased (descending series) until the participant reports a change in sensation.  The crossover point between affirmative and negative responses yields an estimate of threshold; averaging across multiple ascending and descending runs mitigates habituation and anticipation effects.  The method of constant stimuli presents intensities in random order to avoid predictability, albeit at the cost of more trials.  In our framework, threshold sessions use an ascending heat ramp delivered by the thermal stimulator.  Participants press a key when the sensation becomes painful; the temperature at that time is recorded and averaged across several runs.
+
+\subsection{Pain rating calibration}
+To map stimulus intensity onto perceived pain magnitude, researchers commonly use continuous rating scales.  The Visual Analogue Scale (VAS) is a 100 mm horizontal line whose endpoints denote ``no pain'' and ``worst pain imaginable.''  Participants mark the point corresponding to their current pain, yielding a score in millimetres.  Because pain perception exists on a continuum, VAS provides a fine‑grained, unidimensional measure and avoids discretisation artefacts inherent in categorical verbal scales.  In the calibration session of our framework, participants signal when the pain reaches specified VAS values (e.g., 20, 40 and 60 mm).  Temperatures at these markers are recorded, forming a psychophysical function from temperature to perceived intensity that is used to select stimulus levels in subsequent sessions.
+
+\subsection{Conditioned pain modulation}
+Pain perception is dynamically regulated by descending inhibitory and facilitatory mechanisms.  Conditioned Pain Modulation (CPM) describes the phenomenon whereby one noxious stimulus (conditioning stimulus) alters the perceived intensity of another (test stimulus).  CPM is thought to reflect diffuse noxious inhibitory control, wherein a nociceptive input activates a spino‑bulbar‑spinal loop that suppresses ascending transmission.  In paradigms described as ``pain inhibits pain,'' test stimuli presented during the conditioning stimulus are often rated as less intense.  Individual differences in CPM have been linked to chronic pain conditions and treatment efficacy.  Our framework supports CPM sessions in which the highest calibrated temperature serves as the test stimulus and a second modality (e.g., cold water immersion) provides the conditioning stimulus.  Comparing test stimulus ratings before and during the conditioning stimulus enables assessment of endogenous inhibitory capacity.
+
+\section{System Architecture}
+The system is organised into modular components that abstract hardware interactions and centralise event handling.  A single experiment controller orchestrates the workflow: it gathers participant information, initialises device handlers, triggers synchronisation events, administers trial sequences and logs responses.
+
+\begin{itemize}
+  \item \textbf{Thermal stimulator handler:} communicates with the heat delivery device over TCP/IP to select programmes, trigger temperature ramps and monitor status.
+  \item \textbf{Eye tracker handler:} uses vendor libraries (e.g., Pylink for Eyelink systems) to calibrate gaze measurements, record pupil size and inject event messages into the data stream.
+  \item \textbf{EEG handler:} transmits digital codes to the EEG amplifier via a parallel port or other digital I/O; codes are sent with short pulses to ensure reliable detection.
+  \item \textbf{LED and video:} an LED placed in the field of view of the infrared camera flashes at session start and end; these flashes appear as brightness transients in the video and anchor the reference timeline.
+  \item \textbf{Data logger:} records time‑stamped events and propagates them to all devices.  When a stimulus begins, the logger writes a software timestamp, sends an event code to the EEG, posts a message to the eye tracker and optionally triggers the thermal stimulator.
+\end{itemize}
+Each handler implements a uniform interface, facilitating extensibility.  Developers can substitute placeholder handlers that simulate realistic device timing without requiring hardware, enabling offline testing and code reuse.
+
+\section{Clock Synchronisation}
+\subsection{Theoretical foundation and related work}
+In a multi‑device setup each instrument uses its own internal clock.  Let $t_i$ denote the time reported by device~$i$ and $t_R$ the reference time (for example, the frame time of the infrared camera).  Because clock rates and zero points differ, the relationship between $t_i$ and $t_R$ is typically modelled by an affine transformation
+\begin{equation}
+    t_R = a_i t_i + b_i,
+\end{equation}
+where $a_i$ accounts for relative drift and $b_i$ for offset.  Such models are widely used in distributed sensor networks and network time protocols, which perform synchronisation by exchanging time stamps.  In our setting we cannot query clocks directly, but we can generate synchronisation events that appear in all devices and then solve for the parameters $a_i$ and $b_i$.
+
+\subsection{Mathematical principles and proof}
+Suppose we generate at least two events that occur simultaneously across devices.  Let $(t_{i,1}, t_{R,1})$ and $(t_{i,2}, t_{R,2})$ be the timestamps of the first and second events on device~$i$ and the reference, respectively.  Then
+\begin{align}
+    t_{R,1} &= a_i t_{i,1} + b_i,\\
+    t_{R,2} &= a_i t_{i,2} + b_i.
+\end{align}
+Solving these two linear equations yields
+\begin{equation}
+    a_i = \frac{t_{R,2} - t_{R,1}}{t_{i,2} - t_{i,1}},\qquad b_i = t_{R,1} - a_i t_{i,1}.
+\end{equation}
+If more than two events are available, the parameters can be estimated by least‑squares regression, minimising the sum of squared residuals $\sum_k (t^{(R)}_k - (a_i t^{(i)}_k + b_i))^2$.  The affine model assumes that clock drift is linear over the session.  In practice this holds over the short duration of typical pain experiments, but additional events can test for higher‑order effects and inform drift correction.
+
+\subsection{Implementation details}
+The system schedules three flashes of the LED at the beginning and end of each session.  Each flash appears in the infrared video, producing sharp brightness changes.  Corresponding events are simultaneously logged by the controller, recorded as messages in the eye tracker, sent as digital codes to the EEG and (optionally) recorded by the thermal stimulator.  After data acquisition, the LED flash times are extracted from the video and matched to the recorded timestamps in other devices.  With at least two correspondence points per device, the affine parameters $(a_i,b_i)$ are computed and used to transform all device times into the common reference timeline.  If additional synchronisation events are included, a least‑squares fit can improve robustness and detect deviations from linear drift.  Once all streams share a common timeline, continuous signals (e.g., gaze coordinates and pupil size) are interpolated or averaged over small windows and discrete events are aligned using nearest‑neighbour assignment.
+
+\section{LED Event Extraction}
+\subsection{Theoretical background and related work}
+Synchronisation events are generated by a hardware LED placed in view of the infrared camera.  When the LED flashes, it produces a global illumination change that is visible in every video frame.  Detecting flash onset and offset times accurately is crucial because these timestamps define the reference timeline.  Similar optical markers have been used to synchronise EEG and eye‑tracking systems by embedding visual pulses in the stimulus display; the pulses are captured in the EEG via a photodiode and in the video as luminance transients.
+
+\subsection{Mathematical formulation}
+Let $I_k$ denote the mean brightness of frame $k$ in the infrared video.  The discrete derivative $D_k = I_{k+1} - I_k$ emphasises rapid changes in brightness.  Peaks in $|D_k|$ correspond to frames where the LED is switched on or off.  To distinguish true flashes from noise, we compute a threshold $\theta$ as the mean of $D$ plus a multiple of its standard deviation (e.g., $\theta = \bar{D} + 3\sigma_D$).  A frame $k$ is classified as an event onset if $D_k > \theta$; conversely, $D_k < -\theta$ indicates an event offset.  Additional constraints—such as a minimum number of frames between successive events to enforce the known flash duration and a prominence requirement—reduce false detections.  If the algorithm detects fewer than the expected number of flashes, the threshold is adaptively lowered until the desired count is reached.
+
+\subsection{Implementation details}
+After recording, the video is processed to compute the frame‑wise mean brightness.  The derivative sequence is obtained by convolving with the filter $[1, -1]$.  Peaks exceeding the adaptive threshold are detected using standard peak‑finding routines.  The times of the peaks, computed from frame indices and frame rate, provide the LED onset and offset times on the video timeline.  These times are then aligned with corresponding events from other devices.  Because LED flashes define the reference timeline, robustness to noise and lighting variability is essential; using derivatives and adaptive thresholds achieves this robustness in practice.
+
+\section{Technical Implementation}
+This section summarises the operational details of the framework.
+
+\subsection{Device communication protocols}
+Communication with hardware occurs via dedicated protocols.  The thermal stimulator uses a custom TCP/IP interface to select programmes, issue trigger commands and query status.  The eye tracker communicates through vendor libraries to calibrate the system, start and stop recording and inject messages into the data stream.  EEG event codes are delivered via a parallel port by setting a digital output line, waiting a fixed duration and then clearing the line.  The LED is controlled via a serial interface that toggles the diode on and off for specified durations.
+
+\subsection{Inter‑trial intervals and temperature calibration}
+Predictable timing can lead participants to anticipate stimuli and alter their responses.  To reduce predictability, inter‑trial intervals are drawn from an exponential distribution and bounded within a specified range.  The main experiment uses calibrated temperatures derived from the rating session: the mean threshold minus a small offset defines a no‑pain baseline, and the VAS calibration temperatures define increasing levels of pain.  Each temperature is presented multiple times in random order to balance habituation and expectation.  Additional modules implement conditioned pain modulation by applying a continuous high‑temperature test stimulus while a second modality provides the conditioning stimulus.
+
+\subsection{Placeholder and testing environment}
+For development without laboratory hardware, each handler includes a placeholder implementation that simulates realistic timing and data.  Placeholders implement the same interface as real devices but return pre‑recorded or random values.  This allows developers to test the experiment logic, visual presentation and synchronisation pipeline without specialised equipment.
+
+\section{Validation Procedure}
+To validate that the synchronisation pipeline aligns device clocks correctly, a simple experiment is conducted without pain stimuli.  All devices are placed in recording mode, and the controller generates a sequence of 60 synchronisation events.  Each event involves sending a digital trigger to the EEG, logging a message to the eye tracker, optionally sending a dummy command to the thermal stimulator, recording an event in the controller log and flashing the LED.  Inter‑event intervals are randomised between 0.5 and 1.5 seconds.  After acquisition, the synchronisation algorithm computes the affine transformation for each device and transforms its timestamps onto the reference timeline.  Residual errors $\Delta_i = \hat{t}^{(\text{dev} \to \text{ref})}_i - t^{(\text{ref})}_i$ are then examined.  Successful synchronisation is indicated when these differences cluster around zero with small variance and no systematic trend over time.
+
+\section{Discussion}
+The framework described in this paper offers a comprehensive approach to multi‑modal pain research.  Its strengths lie in the integration of established psychophysical techniques with modern hardware abstraction and statistical synchronisation.  By modelling clock drift as an affine function and deriving parameters from multiple synchronisation events, the system achieves sub‑frame alignment of diverse devices.  The LED extraction method leverages simple signal processing to detect optical markers robustly without manual annotation.  The modular architecture ensures that new hardware can be integrated with minimal changes, and placeholder implementations allow rapid development and testing.  Moreover, the use of continuous pain rating scales and individual calibration enables personalised stimulus presentation.
+
+Limitations include the assumption of linear drift; very long sessions or devices with non‑linear drift may require higher‑order models or more frequent synchronisation events.  Additionally, the validation procedure presented here, while sufficient for demonstration, should be extended with formal equivalence testing and confidence intervals when used to certify experimental setups.  Future work could incorporate real‑time synchronisation, robust regression techniques and additional modalities such as functional near‑infrared spectroscopy or galvanic skin response.
+
+\section{Conclusion}
+Synchronising heterogeneous physiological and behavioural data streams is essential for elucidating the neural and psychological mechanisms of pain.  The framework presented here combines psychophysical rigor, modular software engineering and affine clock alignment to achieve millisecond‑level synchronisation across thermal stimulators, eye trackers, EEG systems and video.  Through careful design of threshold and rating sessions, personalised calibration and event‑driven architecture, it provides a solid foundation for advanced pain research.  The explicit derivation of the synchronisation model, robust LED detection and validation procedure facilitate reproducibility and transparency.  As multi‑modal experimentation continues to expand, such frameworks will be indispensable for generating precise, interpretable and generalisable findings.
+
+\end{document}

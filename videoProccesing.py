@@ -145,44 +145,75 @@ def extract_light_events_time(_video_path, do_plot=True, show_plot=False, save_p
     brightness = plot_video_mean_brightness(_video_path, return_output=True)
     brightness_derivative = convolve(brightness, np.array([1, -1]), 'same')
     brightness_derivative[0] = brightness_derivative[1]
-    derivative_slicing = slice(start_padding, -end_padding)
+    
+    # Adjust padding to fit video length
+    total_frames = len(brightness_derivative)
+    start_padding = min(start_padding, total_frames // 4)  # Max 25% of video
+    end_padding = min(end_padding, total_frames // 2)  # Max 50% of video
+    
+    # Ensure slice is valid (not empty)
+    if start_padding >= total_frames - end_padding:
+        start_padding = max(1, total_frames // 10)  # Use 10% if too large
+        end_padding = max(1, total_frames // 10)
+    
+    # Use a smaller slice just for computing statistics (exclude noisy start/end)
+    derivative_slicing = slice(start_padding, -end_padding if end_padding > 0 else None)
     mean_brightness = brightness_derivative[derivative_slicing].mean()
     std_brightness = brightness_derivative[derivative_slicing].std()
-    brightness_threshold = mean_brightness + 3 * std_brightness
+    # Use moderate threshold (2.5*std)
+    brightness_threshold = mean_brightness + 2.5 * std_brightness
 
-    derivative_peaks_slicing = slice(None, -end_padding)
+    # Search in the FULL array (don't exclude end, just exclude very noisy start)
+    derivative_peaks_slicing = slice(start_padding, None)  # Only exclude start, not end
+    search_array = brightness_derivative[derivative_peaks_slicing]
     light_duration_and_interval_in_seconds = 3
     frames_peak_to_peak = light_duration_and_interval_in_seconds * fps
 
     def get_events(_brightness_threshold, event_type='lights_on'):
         while True:
-            lights_events, _ = find_peaks(np.abs(brightness_derivative[derivative_peaks_slicing]),
-                                          distance=frames_peak_to_peak - 2, height=_brightness_threshold,
-                                          prominence=0.5)
+            # Find peaks directly in positive or negative derivative
+            # Use smaller distance to allow close peaks, but still prevent noise
+            min_distance = max(1, int(fps * 0.5))  # At least 0.5 seconds apart
+            
             if event_type == 'lights_on':
-                events = lights_events[np.where(brightness_derivative[lights_events] > 0)[0]]
-            elif event_type == 'lights_off':
-                events = lights_events[np.where(brightness_derivative[lights_events] < 0)[0]]
-            else:
-                raise ValueError(f'Unknown event type: {event_type}')
+                # Find peaks in positive derivative (lights turning on)
+                events, _ = find_peaks(search_array,
+                                      distance=min_distance,
+                                      height=_brightness_threshold,
+                                      prominence=0.2 * std_brightness)
+            else:  # lights_off
+                # Find peaks in negative derivative (inverted, so we look for positive peaks)
+                events, _ = find_peaks(-search_array,
+                                      distance=min_distance,
+                                      height=_brightness_threshold,
+                                      prominence=0.2 * std_brightness)
 
             if events.size >= 3:
-                return events
+                # Adjust indices back to full array coordinates
+                return events + start_padding
 
-            if _brightness_threshold > mean_brightness:
-                _brightness_threshold -= 0.10 * std_brightness
+            # Moderate threshold reduction
+            if _brightness_threshold > mean_brightness + 0.5 * std_brightness:
+                _brightness_threshold -= 0.15 * std_brightness
             else:
                 break
 
-        return events
+        # Return empty array if no events found
+        return np.array([], dtype=int)
 
     lights_on_events = get_events(brightness_threshold, event_type='lights_on')
     lights_off_events = get_events(brightness_threshold, event_type='lights_off')
-
-    if lights_off_events.size < 3:
-        lights_off_events, _ = find_peaks(-brightness_derivative[derivative_peaks_slicing],
-                                          distance=frames_peak_to_peak * 2,
-                                          height=brightness_threshold + 3 * std_brightness)
+    
+    # Sort events by frame index and limit to first 6 of each kind
+    lights_on_events = np.sort(lights_on_events)
+    lights_off_events = np.sort(lights_off_events)
+    
+    max_events = 6
+    if lights_on_events.size > max_events:
+        lights_on_events = lights_on_events[:max_events]  # Take first 6
+    
+    if lights_off_events.size > max_events:
+        lights_off_events = lights_off_events[:max_events]  # Take first 6
 
     if do_plot:
         p1, = plt.plot(brightness_derivative, label='derivative')

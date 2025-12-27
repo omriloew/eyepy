@@ -3,11 +3,11 @@ import pandas as pd
 
 def edf_to_df(file_path: str) -> pd.DataFrame:
     """
-    טוענת קובץ EDF, ממירה ל-DataFrame ומדפיסה את הראש.
-    תומכת גם בקבצי Eyelink EDF וגם בקבצי EDF סטנדרטיים.
-    מחזירה את ה-DataFrame.
+    Loads an EDF file, converts it to a DataFrame and prints the head.
+    Supports both Eyelink EDF files and standard EDF files.
+    Returns the DataFrame.
     """
-    # נסה לזהות אם זה קובץ Eyelink EDF
+    # Try to identify if this is an Eyelink EDF file
     try:
         with open(file_path, 'rb') as f:
             header = f.read(100).decode('latin-1', errors='ignore')
@@ -16,7 +16,7 @@ def edf_to_df(file_path: str) -> pd.DataFrame:
         is_eyelink = False
     
     if is_eyelink:
-        # קובץ Eyelink EDF - שימוש ב-eyelinkio
+        # Eyelink EDF file - using eyelinkio
         try:
             from eyelinkio import read_edf
             edf = read_edf(file_path)
@@ -54,6 +54,9 @@ def edf_to_df(file_path: str) -> pd.DataFrame:
                     else:
                         df.loc[closest_idx, 'event_label'] = msg_text
             
+            # Remove the first row
+            df = df.iloc[1:].reset_index(drop=True)
+            
             print("Eyelink EDF file loaded successfully")
             print(f"Eye recorded: {edf.info.get('eye', 'Unknown')}")
             print(f"Sampling rate: {edf.info['sfreq']} Hz")
@@ -77,10 +80,12 @@ def edf_to_df(file_path: str) -> pd.DataFrame:
         except Exception as e:
             raise ValueError(f"Failed to read Eyelink EDF file: {e}")
     else:
-        # קובץ EDF סטנדרטי - שימוש ב-mne
+        # Standard EDF file - using mne
         try:
             raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
             df = raw.to_data_frame()
+            # Remove the first row
+            df = df.iloc[1:].reset_index(drop=True)
             print(df.head())
             return df
         except Exception as e:
