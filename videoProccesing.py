@@ -160,8 +160,8 @@ def extract_light_events_time(_video_path, do_plot=True, show_plot=False, save_p
     derivative_slicing = slice(start_padding, -end_padding if end_padding > 0 else None)
     mean_brightness = brightness_derivative[derivative_slicing].mean()
     std_brightness = brightness_derivative[derivative_slicing].std()
-    # Use moderate threshold (2.5*std)
-    brightness_threshold = mean_brightness + 2.5 * std_brightness
+    # Use higher threshold (3.5*std) to reduce false positives
+    brightness_threshold = mean_brightness + 3.5 * std_brightness
 
     # Search in the FULL array (don't exclude end, just exclude very noisy start)
     derivative_peaks_slicing = slice(start_padding, None)  # Only exclude start, not end
@@ -235,6 +235,133 @@ def extract_light_events_time(_video_path, do_plot=True, show_plot=False, save_p
         elif show_plot:
             plt.show()
 
+    return lights_on_events, lights_off_events
+
+
+def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=True, show_plot=False, save_plot_path=None):
+    """
+    Extract LED ON/OFF events from stat_intensity column (similar to extract_light_events_time but for 1D array).
+    
+    Args:
+        intensity_array: 1D numpy array of intensity values
+        time_stamps: 1D numpy array of corresponding time stamps (for calculating fps)
+        do_plot: Whether to create a plot
+        show_plot: Whether to display the plot
+        save_plot_path: Optional path to save the plot
+    
+    Returns:
+        Tuple of (lights_on_indices, lights_off_indices) as numpy arrays
+    """
+    # Calculate approximate fps from time stamps
+    if len(time_stamps) > 1:
+        avg_dt = np.mean(np.diff(time_stamps))
+        fps = 1.0 / avg_dt if avg_dt > 0 else 30.0  # Default to 30 if can't calculate
+    else:
+        fps = 30.0
+    
+    start_padding = int(3 * fps)
+    end_padding = int(60 * fps)
+    
+    # Apply lowpass filter to intensity (similar to brightness processing)
+    b, a = butter(5, 0.1, 'lowpass')
+    intensity_filtered = filtfilt(b, a, intensity_array, padtype=None)
+    
+    # Calculate derivative
+    intensity_derivative = convolve(intensity_filtered, np.array([1, -1]), 'same')
+    intensity_derivative[0] = intensity_derivative[1]
+    
+    # Adjust padding to fit array length
+    total_frames = len(intensity_derivative)
+    start_padding = min(start_padding, total_frames // 4)  # Max 25% of array
+    end_padding = min(end_padding, total_frames // 2)  # Max 50% of array
+    
+    # Ensure slice is valid (not empty)
+    if start_padding >= total_frames - end_padding:
+        start_padding = max(1, total_frames // 10)  # Use 10% if too large
+        end_padding = max(1, total_frames // 10)
+    
+    # Use a smaller slice just for computing statistics (exclude noisy start/end)
+    derivative_slicing = slice(start_padding, -end_padding if end_padding > 0 else None)
+    mean_intensity = intensity_derivative[derivative_slicing].mean()
+    std_intensity = intensity_derivative[derivative_slicing].std()
+    # Use higher threshold (3.5*std) to reduce false positives
+    intensity_threshold = mean_intensity + 3.5 * std_intensity
+    
+    # Search in the FULL array (don't exclude end, just exclude very noisy start)
+    derivative_peaks_slicing = slice(start_padding, None)  # Only exclude start, not end
+    search_array = intensity_derivative[derivative_peaks_slicing]
+    light_duration_and_interval_in_seconds = 3
+    frames_peak_to_peak = light_duration_and_interval_in_seconds * fps
+    
+    def get_events(_intensity_threshold, event_type='lights_on'):
+        while True:
+            # Find peaks directly in positive or negative derivative
+            # Use smaller distance to allow close peaks, but still prevent noise
+            min_distance = max(1, int(fps * 0.5))  # At least 0.5 seconds apart
+            
+            if event_type == 'lights_on':
+                # Find peaks in positive derivative (lights turning on)
+                events, _ = find_peaks(search_array,
+                                      distance=min_distance,
+                                      height=_intensity_threshold,
+                                      prominence=0.2 * std_intensity)
+            else:  # lights_off
+                # Find peaks in negative derivative (inverted, so we look for positive peaks)
+                events, _ = find_peaks(-search_array,
+                                      distance=min_distance,
+                                      height=_intensity_threshold,
+                                      prominence=0.2 * std_intensity)
+            
+            if events.size >= 3:
+                # Adjust indices back to full array coordinates
+                return events + start_padding
+            
+            # Moderate threshold reduction
+            if _intensity_threshold > mean_intensity + 0.5 * std_intensity:
+                _intensity_threshold -= 0.15 * std_intensity
+            else:
+                break
+        
+        # Return empty array if no events found
+        return np.array([], dtype=int)
+    
+    lights_on_events = get_events(intensity_threshold, event_type='lights_on')
+    lights_off_events = get_events(intensity_threshold, event_type='lights_off')
+    
+    # Sort events by index and limit to first 6 of each kind
+    lights_on_events = np.sort(lights_on_events)
+    lights_off_events = np.sort(lights_off_events)
+    
+    max_events = 6
+    if lights_on_events.size > max_events:
+        lights_on_events = lights_on_events[:max_events]  # Take first 6
+    
+    if lights_off_events.size > max_events:
+        lights_off_events = lights_off_events[:max_events]  # Take first 6
+    
+    if do_plot:
+        p1, = plt.plot(intensity_derivative, label='derivative')
+        plt.axhline(intensity_threshold, linestyle='--')
+        plt.axhline(-intensity_threshold, linestyle='--')
+        plt.scatter(lights_on_events, intensity_derivative[lights_on_events], label='lights on')
+        plt.scatter(lights_off_events, intensity_derivative[lights_off_events], label='lights off')
+        ax = plt.gca()
+        twin_ax = ax.twinx()
+        p2, = twin_ax.plot(intensity_filtered, c='tab:purple', label='intensity (filtered)')
+        twin_ax.legend(loc='lower right')
+        twin_ax.tick_params(axis='y', colors=p2.get_color())
+        ax.set_title('Intensity Derivative')
+        ax.set_xlabel('frame index')
+        ax.set_ylabel('intensity derivative')
+        ax.legend(loc='upper right')
+        if save_plot_path is not None:
+            plt.savefig(save_plot_path)
+            plt.close()
+        elif show_plot:
+            plt.show()
+        else:
+            plt.close()
+    
     return lights_on_events, lights_off_events
 
 

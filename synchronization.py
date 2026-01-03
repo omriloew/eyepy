@@ -111,11 +111,38 @@ def _pool_numeric_col(reference_df: pd.DataFrame, device_df: pd.DataFrame, col: 
     device_times = device_df[TIME_COL].to_numpy(dtype=float)
     reference_times = reference_df[TIME_COL].to_numpy(dtype=float)
     window_sec = window_ms / 1000.0
-    for reference_time in reference_times:
-        times_in_window = device_times[np.abs(device_times - reference_time) <= window_sec]
-        vals_in_window = device_df.loc[device_df[TIME_COL].isin(times_in_window), col].to_numpy(dtype=float)
-        if len(vals_in_window) > 0:
-            reference_df.loc[reference_df[TIME_COL] == reference_time, col] = np.mean(vals_in_window)
+    
+    # Get device values for the column
+    device_values = device_df[col].to_numpy(dtype=float)
+    
+    # Remove NaN values for interpolation
+    valid_mask = ~np.isnan(device_values)
+    if np.sum(valid_mask) < 2:
+        # Not enough data points for interpolation, use window-based approach
+        for reference_time in reference_times:
+            times_in_window = device_times[np.abs(device_times - reference_time) <= window_sec]
+            vals_in_window = device_df.loc[device_df[TIME_COL].isin(times_in_window), col].to_numpy(dtype=float)
+            if len(vals_in_window) > 0:
+                reference_df.loc[reference_df[TIME_COL] == reference_time, col] = np.mean(vals_in_window)
+    else:
+        # Use interpolation for continuous values
+        valid_times = device_times[valid_mask]
+        valid_values = device_values[valid_mask]
+        
+        # Interpolate to reference times
+        interpolated_values = np.interp(reference_times, valid_times, valid_values, 
+                                       left=np.nan, right=np.nan)
+        
+        # For points outside interpolation range, use window-based approach
+        for i, reference_time in enumerate(reference_times):
+            if np.isnan(interpolated_values[i]):
+                times_in_window = device_times[np.abs(device_times - reference_time) <= window_sec]
+                vals_in_window = device_df.loc[device_df[TIME_COL].isin(times_in_window), col].to_numpy(dtype=float)
+                if len(vals_in_window) > 0:
+                    interpolated_values[i] = np.mean(vals_in_window)
+        
+        reference_df[col] = interpolated_values
+    
     return reference_df
 
 def _pool_events(reference_df: pd.DataFrame, device_df: pd.DataFrame) -> pd.DataFrame:

@@ -54,6 +54,7 @@ smmap==5.0.2
 sounddevice==0.4.6
 soundfile==0.12.1
 sr-research-pylink==2.1.762.0
+psychopy-eyelink-coregraphics==2.1.1179.0
 tqdm==4.67.1
 ujson==5.7.0
 urllib3==2.2.3

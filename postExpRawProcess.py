@@ -1,6 +1,9 @@
+from pickle import NONE
+from tkinter.constants import FALSE
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import numpy as np
 import coloredPrint as cp
 import synchronization as sync
 import videoProccesing as vp
@@ -11,32 +14,40 @@ always_keep_cols = ['time_stamp', 'event_label'] #DO NOT CHANGE THIS
 #===============================================
 # events configuration
 #===============================================
-events_csv_path = 'plr/omri_plr_events.csv'
+events_csv_path = '2/4/threshold/omer_threshold_events.csv'
 keep_events_cols = ['_event_code']
 #===============================================
 # swir configuration
 #===============================================
 process_swir = True
-swir_avi_file_path = 'plr/output.avi'
-keep_swir_cols = ['event_label']
+swir_csv_path = '2/4/threshold/roi_intensity_results_th4.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
+keep_swir_cols = ['frame', 'dyn_intensity', 'dyn_darkness', 'stat_intensity', 'stat_darkness', 'roi_update']
+swir_scale_factors = {'dyn_intensity': 100, 'dyn_darkness': 100}  # Multipliers for SWIR columns: {'column_name': multiplier}
+swir_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -13500.0}  # Drift/offset for SWIR columns: {'column_name': offset_value}
 #===============================================
 # medoc configuration
 #===============================================
-process_medoc = False
-medoc_csv_path = 'plr/omri_plr_medoc_events.csv'
+process_medoc = True
+medoc_csv_path = '2/4/threshold/omer_threshold_medoc_events.csv'
 keep_medoc_cols = ['temperature_c']
+medoc_scale_factors = {'temperature_c': 100.0}  # Multipliers for MEDOC columns: {'column_name': multiplier}
+medoc_drift_factors = {}  # Drift/offset for MEDOC columns: {'column_name': offset_value}
 #===============================================
 # eeg configuration
 #===============================================
 process_eeg = False
 eeg_file_path = 'rawFilesToTestWith/STM_Visualization_Clean_v2_EN.ipynb.edf'
 keep_eeg_cols = []
+eeg_scale_factors = {}  # Multipliers for EEG columns: {'column_name': multiplier}
+eeg_drift_factors = {}  # Drift/offset for EEG columns: {'column_name': offset_value}
 #===============================================
 # eyelink configuration 
 #===============================================
 process_eyelink = True
-eyelink_file_path = 'plr/test.edf'
-keep_eyelink_cols = ['xpos', 'ypos', 'ps']
+eyelink_file_path = '2/4/threshold/test.edf'
+keep_eyelink_cols = ['ps']
+eyelink_scale_factors = {'xpos': 1.0, 'ypos': 1.0, 'ps': 1.0}  # Multipliers for Eyelink columns: {'column_name': multiplier}
+eyelink_drift_factors = {}  # Drift/offset for Eyelink columns: {'column_name': offset_value}
 #===============================================
 # output configuration
 #===============================================
@@ -55,7 +66,16 @@ sychronize_to = 'SWIR'
 #===============================================
 # visualization configuration
 #===============================================
-columns_to_exclude_from_plot = ['frame_index']  # Columns to exclude from final visualization
+columns_to_exclude_from_plot = ['frame_index', 'frame', 'roi_update', 'stat_darkness']  # Columns to exclude from final visualization
+# Additional CSV to plot alongside synced data (optional)
+# CSV should have 'time_sec' column (will be matched to 'time_stamp' in synced data)
+additional_csv_to_plot = NONE # Set to CSV file path or None to skip
+additional_csv_multiplier = 100.0  # Multiplier to apply to all numeric columns from additional CSV
+additional_csv_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -13500.0}  # Drift/offset for additional CSV columns: {'column_name': offset_value}
+additional_csv_exclude_cols = ['frame', 'roi_update', 'stat_darkness']  # Columns to exclude from additional CSV when plotting
+# Example: additional_csv_to_plot = '2/4/pain_rating/roi_intensity_results_NRS4.csv'
+# Example: additional_csv_multiplier = 0.001  # Scale down by 1000
+# Example: additional_csv_exclude_cols = ['frame', 'frame_index', 'other_col']
 
 
 def configure_output_paths():
@@ -74,41 +94,72 @@ def configure_output_paths():
     return session_output_dir, output_csv_sufix
 
 def configure_input_paths():
-    return events_csv_path, medoc_csv_path, eeg_file_path, eyelink_file_path, swir_avi_file_path
+    return events_csv_path, medoc_csv_path, eeg_file_path, eyelink_file_path, swir_csv_path
 
-def swir_avi_to_df(session_output_dir=None, output_csv_sufix=None, swir_avi_file_path=None):
+def swir_csv_to_df(session_output_dir=None, output_csv_sufix=None, swir_csv_path=None):
     print("================================================")
-    cp.colored_print("== Converting SWIR AVI to DataFrame ==", color=cp.Fore.CYAN)
-    # Convert the video to a DataFrame
-    save_path = f'{session_output_dir}/swir_{output_csv_sufix}' if session_output_dir and output_csv_sufix else None
-    swir_df = vp.video_to_df(swir_avi_file_path, save_path=save_path)
-    # Extract light events from the video
+    cp.colored_print("== Converting SWIR CSV to DataFrame ==", color=cp.Fore.CYAN)
+    
+    # Load the CSV file
+    if not os.path.exists(swir_csv_path):
+        raise FileNotFoundError(f"SWIR CSV file not found: {swir_csv_path}")
+    
+    swir_df = pd.read_csv(swir_csv_path)
+    cp.colored_print(f"Loaded {len(swir_df)} rows from {swir_csv_path}", color=cp.Fore.GREEN)
+    
+    # Check required columns
+    if 'time_sec' not in swir_df.columns:
+        raise ValueError(f"CSV must contain 'time_sec' column. Found columns: {swir_df.columns.tolist()}")
+    if 'stat_intensity' not in swir_df.columns:
+        raise ValueError(f"CSV must contain 'stat_intensity' column. Found columns: {swir_df.columns.tolist()}")
+    
+    # Rename time_sec to time_stamp
+    swir_df = swir_df.rename(columns={'time_sec': 'time_stamp'})
+    
+    # Add event_label column (initialize as empty string)
+    swir_df['event_label'] = ''
+    
+    # Extract LED events from stat_intensity column
     save_plot_path = f'{session_output_dir}/light_events.png' if session_output_dir else None
-    light_events_frame_indices = vp.extract_light_events_time(swir_avi_file_path, save_plot_path=save_plot_path)
-    led_on_frames = light_events_frame_indices[0]  # LED_ON frame indices
-    led_off_frames = light_events_frame_indices[1]  # LED_OFF frame indices
-    cp.colored_print(f"LED_ON frame indices: {led_on_frames}", color=cp.Fore.BLUE)
-    cp.colored_print(f"LED_OFF frame indices: {led_off_frames}", color=cp.Fore.BLUE)
-    # Add LED event labels to the DataFrame
-    swir_df['event_label'] = swir_df['event_label'].astype(str)  # Ensure it's string type
+    intensity_array = swir_df['stat_intensity'].values
+    time_stamps = swir_df['time_stamp'].values
+    
+    cp.colored_print("Extracting LED events from stat_intensity column...", color=cp.Fore.YELLOW)
+    light_events_indices = vp.extract_light_events_from_intensity(
+        intensity_array, 
+        time_stamps, 
+        save_plot_path=save_plot_path
+    )
+    led_on_indices = light_events_indices[0]  # LED_ON row indices
+    led_off_indices = light_events_indices[1]  # LED_OFF row indices
+    
+    cp.colored_print(f"LED_ON row indices (auto-detected): {led_on_indices}", color=cp.Fore.BLUE)
+    cp.colored_print(f"LED_OFF row indices (auto-detected): {led_off_indices}", color=cp.Fore.BLUE)
+    
     # Mark LED_ON events
-    for frame_idx in led_on_frames:
-        if frame_idx < len(swir_df):
-            swir_df.loc[frame_idx, 'event_label'] = "LED_ON"
-    # Mark LED_OFF events  
-    for frame_idx in led_off_frames:
-        if frame_idx < len(swir_df):
-            swir_df.loc[frame_idx, 'event_label'] = "LED_OFF"
+    for row_idx in led_on_indices:
+        if 0 <= row_idx < len(swir_df):
+            swir_df.iloc[row_idx, swir_df.columns.get_loc('event_label')] = "LED_ON"
+    
+    # Mark LED_OFF events
+    for row_idx in led_off_indices:
+        if 0 <= row_idx < len(swir_df):
+            swir_df.iloc[row_idx, swir_df.columns.get_loc('event_label')] = "LED_OFF"
+    
     # Save the updated CSV with LED events
     if session_output_dir and output_csv_sufix:
-        swir_df.to_csv(f'{session_output_dir}/swir_{output_csv_sufix}', index=False)
-        cp.colored_print(f"saved file: {f'{session_output_dir}/swir_{output_csv_sufix}'}", color=cp.Fore.BLUE)
+        save_path = f'{session_output_dir}/swir_{output_csv_sufix}'
+        swir_df.to_csv(save_path, index=False)
+        cp.colored_print(f"saved file: {save_path}", color=cp.Fore.BLUE)
     
     # Show preview of events
     led_events = swir_df[swir_df['event_label'].isin(['LED_ON', 'LED_OFF'])]
     if not led_events.empty:
         cp.colored_print(f"LED Events Preview:", color=cp.Fore.CYAN)
         cp.colored_print(led_events.head(10).to_string(index=False), color=cp.Fore.BLUE)
+    else:
+        cp.colored_print("Warning: No LED events detected", color=cp.Fore.YELLOW)
+    
     print("================================================")
     return swir_df
 
@@ -124,11 +175,6 @@ def get_eyelink_df(eyelink_file_path, session_output_dir=None, output_csv_sufix=
         save_path = f'{session_output_dir}/eyelink_{output_csv_sufix}'
         df.to_csv(save_path, index=False)
         cp.colored_print(f"saved file: {save_path}", color=cp.Fore.BLUE)
-        
-        # Visualize the raw Eyelink data
-        plot_save_path = f'{session_output_dir}/eyelink_raw_plot_{output_csv_sufix}'.replace('.csv', '.png')
-        plot_df_in_time(df, columns_to_plot=['xpos', 'ypos', 'ps'], df_name="EYELINK RAW", save_path=plot_save_path)
-        cp.colored_print(f"Raw Eyelink plot saved to: {plot_save_path}", color=cp.Fore.BLUE)
     print("================================================")
     return df
 
@@ -189,7 +235,7 @@ def print_def_columns_and_unique_values(df, df_name="DATAFRAME"):
             print("...(truncated)...")
         print("------")
 
-def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRAME", save_path=None):
+def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, drift_factors=None, df_name="DATAFRAME", save_path=None):
     """
     Plots specified columns against time on a single graph.
     
@@ -197,6 +243,7 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRA
         df: DataFrame with 'time_stamp' and optionally 'event_label' columns
         columns_to_plot: List of column names to plot
         scale_factors: Dict mapping column name -> float factor to scale the values
+        drift_factors: Dict mapping column name -> float offset to add to values (for visual separation)
         df_name: Name for the plot title
         save_path: Optional path to save the plot as PNG (if None, shows the plot)
     
@@ -209,6 +256,8 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRA
     """
     if scale_factors is None:
         scale_factors = {}
+    if drift_factors is None:
+        drift_factors = {}
     
     time_col = 'time_stamp'
     
@@ -239,20 +288,33 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRA
     # Plot continuous columns as lines
     for col in continuous_cols:
         scale = scale_factors.get(col, 1.0)
-        values = df[col] * scale
-        ax.plot(df[time_col], values, label=f"{col} (×{scale:.2f})" if scale != 1.0 else col, 
-                linewidth=1.5, alpha=0.8)
+        drift = drift_factors.get(col, 0.0)
+        values = df[col] * scale + drift
+        label_parts = []
+        if scale != 1.0:
+            label_parts.append(f"×{scale:.2f}")
+        if drift != 0.0:
+            label_parts.append(f"+{drift:.1f}" if drift > 0 else f"{drift:.1f}")
+        label = f"{col} ({', '.join(label_parts)})" if label_parts else col
+        ax.plot(df[time_col], values, label=label, linewidth=1.5, alpha=0.8)
     
     # Plot discrete columns as markers
     for col in discrete_cols:
         scale = scale_factors.get(col, 1.0)
+        drift = drift_factors.get(col, 0.0)
         # Get rows where this column has non-null/non-zero values
         discrete_df = df[df[col].notna() & (df[col] != 0)].copy()
         if len(discrete_df) > 0:
-            values = discrete_df[col] * scale
+            values = discrete_df[col] * scale + drift
+            label_parts = []
+            if scale != 1.0:
+                label_parts.append(f"×{scale:.2f}")
+            if drift != 0.0:
+                label_parts.append(f"+{drift:.1f}" if drift > 0 else f"{drift:.1f}")
+            label = f"{col} ({', '.join(label_parts)})" if label_parts else col
             ax.scatter(discrete_df[time_col], values, 
                       marker='o', s=50, alpha=0.6, 
-                      label=f"{col} (×{scale:.2f})" if scale != 1.0 else col,
+                      label=label,
                       zorder=4)
     
     ax.set_xlabel("Time (s)")
@@ -305,10 +367,10 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, df_name="DATAFRA
 def main():
     # Configure paths
     session_output_dir, output_csv_sufix = configure_output_paths()
-    events_csv_path, medoc_csv_path, eeg_file_path, eyelink_file_path, swir_avi_file_path = configure_input_paths()
+    events_csv_path, medoc_csv_path, eeg_file_path, eyelink_file_path, swir_csv_path = configure_input_paths()
     devices = {}
     if process_swir:
-        swir_df = swir_avi_to_df(session_output_dir, output_csv_sufix, swir_avi_file_path)
+        swir_df = swir_csv_to_df(session_output_dir, output_csv_sufix, swir_csv_path)
         devices["SWIR"] = swir_df
     if process_eyelink:
         eyelink_df = get_eyelink_df(eyelink_file_path, session_output_dir, output_csv_sufix)
@@ -361,8 +423,54 @@ def main():
     else:
         plot_cols = numeric_cols
     
+    # Load and merge additional CSV if provided
+    if additional_csv_to_plot is not None and os.path.exists(additional_csv_to_plot):
+        print(f"Loading additional CSV: {additional_csv_to_plot}")
+        additional_df = pd.read_csv(additional_csv_to_plot)
+        
+        # Rename time_sec to time_stamp for consistency
+        if 'time_sec' in additional_df.columns:
+            additional_df = additional_df.rename(columns={'time_sec': 'time_stamp'})
+        
+        # Get numeric columns from additional CSV (excluding time_stamp and configured exclusions)
+        exclude_additional_cols = ['time_stamp'] + additional_csv_exclude_cols
+        additional_numeric_cols = [col for col in additional_df.columns 
+                                   if col not in exclude_additional_cols 
+                                   and additional_df[col].dtype in ['float64', 'int64', 'float32', 'int32']]
+        
+        # Merge additional columns into synced_df by interpolating to match time_stamp
+        for col in additional_numeric_cols:
+            # Interpolate additional data to synced time points and apply multiplier
+            synced_df[col] = np.interp(synced_df['time_stamp'], 
+                                       additional_df['time_stamp'], 
+                                       additional_df[col]) * additional_csv_multiplier
+            # Add to plot columns
+            if col not in plot_cols:
+                plot_cols.append(col)
+        
+        cp.colored_print(f"Added {len(additional_numeric_cols)} columns from additional CSV", color=cp.Fore.GREEN)
+    
+    # Build scale factors and drift factors dictionaries from all device configurations
+    scale_factors = {}
+    scale_factors.update(eyelink_scale_factors)
+    scale_factors.update(medoc_scale_factors)
+    scale_factors.update(eeg_scale_factors)
+    scale_factors.update(swir_scale_factors)
+    
+    drift_factors = {}
+    drift_factors.update(eyelink_drift_factors)
+    drift_factors.update(medoc_drift_factors)
+    drift_factors.update(eeg_drift_factors)
+    drift_factors.update(swir_drift_factors)
+    
+    # Add drift factors for additional CSV columns if provided
+    if additional_csv_to_plot is not None and os.path.exists(additional_csv_to_plot):
+        for col in additional_numeric_cols:
+            if col in additional_csv_drift_factors:
+                drift_factors[col] = additional_csv_drift_factors[col]
+    
     plot_save_path = f'{session_output_dir}/synced_combined_plot_{output_csv_sufix}'.replace('.csv', '.png')
-    plot_df_in_time(synced_df, columns_to_plot=plot_cols, df_name="SYNCED COMBINED", save_path=plot_save_path)
+    plot_df_in_time(synced_df, columns_to_plot=plot_cols, scale_factors=scale_factors, drift_factors=drift_factors, df_name="SYNCED COMBINED", save_path=plot_save_path)
     
     print(f"Mappings: {mappings}")
 
@@ -372,7 +480,7 @@ def test():
     events_df = get_events_df('log_files/omri/1/main/omri_main_events.csv')
     plot_df_in_time(events_df,df_name="EVENTS")
     plot_df_in_time(medoc_df, columns_to_plot=["temperature_c"], df_name="MEDOC")
-    swir_df = swir_avi_to_df(swir_avi_file_path=swir_avi_file_path)
+    swir_df = swir_csv_to_df(swir_csv_path=swir_csv_path)
     plot_df_in_time(swir_df, df_name="SWIR")
     eyelink_df = get_eyelink_df(eyelink_file_path)
     plot_df_in_time(eyelink_df, columns_to_plot=["xpos", "ypos", "ps"], df_name="EYELINK")
