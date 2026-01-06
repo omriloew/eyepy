@@ -1,11 +1,11 @@
 from __future__ import division
 from psychopy import visual, event, core, gui, data
+from wx import BLACK_PEN
 
 import config
 import expirimentUtils
 import eegHandler
 import MedocHandler
-import VideoCamera
 import LED
 import eyelinkHandler
 import dataRecordHandler
@@ -73,7 +73,6 @@ log = dataRecordHandler.DataRecordHandler(clock=clock, eeg=eeg, led=led)
 medoc.log = log
 el = eyelinkHandler.init(log.output_dir)
 log.el = el
-vc = VideoCamera.init(log.output_dir)
 log_info("initialized devices")
 # ==============================================
 # HELPER FUNCTIONS
@@ -96,7 +95,6 @@ def start_session():
         draw.show()
         el.calibrate(win)
         el.start_recording()
-        vc.start_recording()
         draw.blank()
         draw.instructions("Press SPACE to start the session")
         draw.show()
@@ -105,14 +103,19 @@ def start_session():
         draw.instructions("synchronizing... please wait")
         draw.show()
         log.start_session()
+        if not curr_session.startswith("plr"):
+            draw.instructions("Press SPACE to start PLR")
+            draw.show()
+            wait_for_space_or_escape()
+            plr_trails(trails_number=2, wait_time=10, flash_duration=1)
+
 
 def finish_session():       
     """Finish a session and save all recorded data."""
     if not_demo:
         draw.instructions("finishing session...")
         draw.show()
-        el.stop_recording()
-        vc.stop_recording()
+        el.stop_recording()     
         log.finish_session()
         summary = log.get_summary()
         cp.print_session("\n=== Session Summary ===")
@@ -122,7 +125,7 @@ def finish_session():
     draw.blank()
     draw.instructions("Thank you for your time!")
     draw.show()
-    wait_for_space()
+    wait_for_space_or_escape()
 
 def wait_for_space(log_medoc=True):
     log_info("waiting for space")
@@ -216,6 +219,56 @@ def genarate_main_temperatures(th_temps, rate_temps):
 def clear_keys():
     event.clearEvents()
 
+def plr_trails(trails_number, wait_time, flash_duration, log_trials=False):
+        # Create a white rectangle that covers the entire screen for the flash
+    white_rect = visual.Rect(win, width=config.scrsize[0], height=config.scrsize[1],
+                             fillColor='white', lineColor='white', pos=(0, 0))
+
+    # Create a black rectangle that covers the entire screen for the background
+    black_rect = visual.Rect(win, width=config.scrsize[0], height=config.scrsize[1],
+                             fillColor='black', lineColor='black', pos=(0, 0))
+
+    # Create a white fixation cross for visibility on black background
+    white_fixation = visual.TextStim(win, text='+', color='white', height=150,
+                                     alignText='center', antialias=False)
+
+    # Create a white fixation cross for visibility on black background
+    black_fixation = visual.TextStim(win, text='+', color='black', height=150,
+                                     alignText='center', antialias=False)
+
+    # Show black background with white fixation immediately BEFORE first flash
+    black_rect.draw()  # Draw black background
+    white_fixation.draw()  # Draw white fixation cross
+    win.flip()  # Show black screen with fixation
+    wait(1, log_medoc=False)  # Brief pause before starting flashes
+
+    # 10 white screen flash trials
+    for i in range(trails_number):
+        trial_num = i + 1
+
+        # Wait for interval before flash (using longer PLR intervals)
+        wait(wait_time, log_medoc=False)
+
+        # White screen flash - draw white rectangle covering entire screen
+        white_rect.draw()
+        black_fixation.draw()
+        win.flip()
+        log.event(config.white_screen_on_msg)  # Log event to all devices
+        core.wait(flash_duration)
+
+        # Return to black screen - draw black rectangle and fixation cross
+        black_rect.draw()  # Draw black background
+        white_fixation.draw()  # Show fixation cross again
+        win.flip()  # Show black screen with fixation
+        log.event(config.white_screen_off_msg)  # Log event to all devices
+
+        if log_trials:
+            log.trial(trial_number=trial_num, wait_time=wait_time, trial_duration=flash_duration)
+
+    # End with rest period - restore grey background
+    win.color = 'grey'  # Restore grey background
+    draw.blank()
+
 # ==============================================
 # THRESHOLD SESSION
 # ==============================================
@@ -226,6 +279,7 @@ def threshold_session():
     #start medoc program
     medoc.start_thermal_program()
     # start instructions screen
+    draw.vas_scale(percentage=0, left_label='0', right_label='100')
     draw.top_instructions("Pain stimulus will be applied to your hand.")
     draw.middle_instructions("Please press SPACE to start, then SPACE again when you feel pain.")
     draw.show()
@@ -235,6 +289,7 @@ def threshold_session():
     for i in range(num_trails):
         trial_num = i + 1
         # pain trial instructions
+        draw.vas_scale(percentage=0, left_label='0', right_label='100')
         draw.bottom_instructions("Press SPACE when you feel pain.")
         draw.fixation_cross()
         draw.show()
@@ -268,6 +323,10 @@ def pain_rating_session():
         draw.bottom_instructions("Please press SPACE to start, then SPACE again when the pain reaches the rating on the scale above")
         draw.show()
         wait_for_space_or_escape()
+        draw.vas_scale(percentage=config.desired_ratings[i], left_label='0', right_label='100')
+        draw.fixation_cross()
+        draw.bottom_instructions("Press SPACE when the pain reaches the rating on the scale above")
+        draw.show()
         wait(intervals[i]) # wait for interval
         medoc.start_threshold_trial() 
         wait_for_space_or_escape() #wait for user to press space
@@ -294,11 +353,18 @@ def main_session():
     draw.bottom_instructions("Please fixate on the cross")
     draw.show()
     wait_for_space_or_escape()
-
+    draw.top_instructions("starting session...")
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
     #start medoc program
     medoc.start_thermal_program()
     # trails
+ 
     medoc.skip_initial_pain_stimulus()
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
     for i in range(num_trails):
         if i in config.break_points_main_session:
             draw.blank()
@@ -337,10 +403,16 @@ def cpm_session():
     draw.bottom_instructions("Please fixate on the cross")
     draw.show()
     wait_for_space_or_escape()
-
+    draw.top_instructions("starting session...")
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
     #start medoc program
     medoc.start_thermal_program()
     medoc.skip_initial_pain_stimulus()
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
     clear_keys()
     # trails
     trial_num = 1
@@ -396,62 +468,7 @@ def plr_session():
     draw.show()
     wait_for_space_or_escape(log_medoc=False)
 
-    # Create a white rectangle that covers the entire screen for the flash
-    white_rect = visual.Rect(win, width=config.scrsize[0], height=config.scrsize[1],
-                             fillColor='white', lineColor='white', pos=(0, 0))
-
-    # Create a black rectangle that covers the entire screen for the background
-    black_rect = visual.Rect(win, width=config.scrsize[0], height=config.scrsize[1],
-                             fillColor='black', lineColor='black', pos=(0, 0))
-
-    # Create a white fixation cross for visibility on black background
-    white_fixation = visual.TextStim(win, text='+', color='white', height=150,
-                                     alignText='center', antialias=False)
-
-    # Flash duration in seconds (can be adjusted)
-    flash_duration = 1.0
-
-    # Generate longer wait times for PLR (minimum 2 seconds, mean 3 seconds)
-    # This ensures enough time between flashes for proper PLR measurement
-    plr_intervals = expirimentUtils.generate_wait_times(
-        trails_number=num_trails,
-        mean=3.0,  # Mean of 3 seconds
-        std=1.0,  # Standard deviation of 1 second
-        min_time=2.0,  # Minimum 2 seconds between flashes
-        max_time=5.0  # Maximum 5 seconds between flashes
-    )
-
-    # Show black background with white fixation immediately BEFORE first flash
-    black_rect.draw()  # Draw black background
-    white_fixation.draw()  # Draw white fixation cross
-    win.flip()  # Show black screen with fixation
-    wait(1, log_medoc=False)  # Brief pause before starting flashes
-
-    # 10 white screen flash trials
-    for i in range(num_trails):
-        trial_num = i + 1
-
-        # Wait for interval before flash (using longer PLR intervals)
-        wait(plr_intervals[i], log_medoc=False)
-
-        # White screen flash - draw white rectangle covering entire screen
-        white_rect.draw()
-        win.flip()
-        log.event(config.white_screen_on_msg)  # Log event to all devices
-        core.wait(flash_duration)
-
-        # Return to black screen - draw black rectangle and fixation cross
-        black_rect.draw()  # Draw black background
-        white_fixation.draw()  # Show fixation cross again
-        win.flip()  # Show black screen with fixation
-        log.event(config.white_screen_off_msg)  # Log event to all devices
-
-        # Log trial data
-        log.trial(trial_number=trial_num, wait_time=plr_intervals[i], trial_duration=flash_duration)
-
-    # End with rest period - restore grey background
-    win.color = 'grey'  # Restore grey background
-    draw.blank()
+    plr_trails(trails_number=num_trails, wait_time=10, flash_duration=1, log_trials=True)
     draw.instructions("Rest period - Please relax")
     draw.show()
     log.event(config.rest_end_msg)
