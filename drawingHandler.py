@@ -183,6 +183,32 @@ class Draw:
 
     def blank(self):
         blank(self.win).draw()
+    
+    def colored_rectangle(self, color='blue', width=None, height=None, opacity=0.5):
+        """
+        Draw a colored rectangle behind the fixation cross.
+        
+        Args:
+            color: Color of the rectangle ('blue' or 'green')
+            width: Width of rectangle in pixels (default: 80% of screen width)
+            height: Height of rectangle in pixels (default: 80% of screen height)
+            opacity: Opacity of rectangle (0.0 to 1.0)
+        """
+        if width is None:
+            width = config.scrsize[0] * 0.8
+        if height is None:
+            height = config.scrsize[1] * 0.8
+        
+        rect = visual.Rect(
+            self.win,
+            width=width,
+            height=height,
+            fillColor=color,
+            lineColor=color,
+            opacity=opacity,
+            pos=(0, 0)
+        )
+        rect.draw()
 
     def vas_scale(self, percentage=50, left_label='0', right_label='100', 
                   scale_width=config.scrsize[0]*0.8, tick_length=10, cursor_size=15, 

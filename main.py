@@ -195,7 +195,7 @@ def abort_session():
     cp.print_error("Escape key pressed, aborting session")
     core.quit() 
 
-def genarate_main_temperatures(th_temps, rate_temps):
+def genarate_main_temperatures(rate_temps):
     """
     Generate temperatures for main session.
     args:
@@ -205,15 +205,16 @@ def genarate_main_temperatures(th_temps, rate_temps):
         list of temperatures for main session
     """
     temperatures = []
-    th_mean = sum(th_temps) / len(th_temps)
-    temperatures.append(th_mean - config.threshold_reduction_factor)
     for rate_temp in rate_temps:
         temperatures.append(rate_temp)
 
     result = []
-    for temp in temperatures:
-        result.extend([temp] * config.each_tmp_rep_num)
-    random.shuffle(result)
+    for _ in range(config.num_main_rounds):
+        round = []
+        for temp in temperatures:
+            round.extend([temp] * config.each_tmp_rep_num)
+        random.shuffle(round)
+        result.extend(round)
     return result
 
 def clear_keys():
@@ -318,12 +319,13 @@ def pain_rating_session():
     for i in range(num_trails):
         trial_num = i + 1
         # pain trial instructions
-        draw.vas_scale(percentage=config.desired_ratings[i], left_label='0', right_label='100')
+        j = i // config.pain_rating_each_tmp_rep_num
+        draw.vas_scale(percentage=config.desired_ratings[j], left_label='0', right_label='100')
         draw.fixation_cross()
         draw.bottom_instructions("Please press SPACE to start, then SPACE again when the pain reaches the rating on the scale above")
         draw.show()
         wait_for_space_or_escape()
-        draw.vas_scale(percentage=config.desired_ratings[i], left_label='0', right_label='100')
+        draw.vas_scale(percentage=config.desired_ratings[j], left_label='0', right_label='100')
         draw.fixation_cross()
         draw.bottom_instructions("Press SPACE when the pain reaches the rating on the scale above")
         draw.show()
@@ -340,12 +342,8 @@ def pain_rating_session():
 # ==============================================
 def main_session():
     intervals = generate_wait_times() #generate wait times
-    th_temps = log.load_session_trials_data(session_type="threshold")
     rate_temps = log.load_session_trials_data(session_type="pain_rating")
-    th_temps = [float(temperature) for temperature in th_temps]
-    
-    rate_temps = [float(temperature) for temperature in rate_temps]
-    tempretures = genarate_main_temperatures(th_temps, rate_temps)
+    tempretures = genarate_main_temperatures(rate_temps)
     # start instructions screen
     draw.blank()
     draw.top_instructions("A pain stimulus will be applied to your hand.")
@@ -366,7 +364,7 @@ def main_session():
     draw.bottom_instructions("Please fixate on the cross")
     draw.show()
     for i in range(num_trails):
-        if i in config.break_points_main_session:
+        if i % config.each_tmp_rep_num == 0:
             draw.blank()
             draw.top_instructions("Adjust the thermod position")
             draw.fixation_cross()
@@ -440,6 +438,222 @@ def cpm_session():
 def custom_session():
    pass
 
+# ==============================================
+# TENSE SESSION
+# ==============================================
+
+def generate_tense_trial_conditions(trials_per_round, extinction=False):
+    """
+    Generate trial conditions for one round of tense session.
+    
+    Each round has:
+    - 50% signal ON, 50% signal OFF
+    - If extinction=False (normal):
+      - From signal ON: 50% high temp, 50% low temp (25% of total each)
+      - From signal OFF: 100% low temp (50% of total)
+    - If extinction=True:
+      - From signal ON: 100% high temp (50% of total)
+      - From signal OFF: 100% low temp (50% of total)
+    
+    Args:
+        trials_per_round: Number of trials per round
+        extinction: If True, all signal ON trials use high temp
+    
+    Returns:
+        List of tuples: (signal_on: bool, temperature: str) where temperature is 'high' or 'low'
+    """
+    m = trials_per_round
+    conditions = []
+    
+    # 50% signal ON (m/2 trials)
+    signal_on_count = m // 2
+    
+    if extinction:
+        # Extinction: all signal ON trials are high temp
+        for _ in range(signal_on_count):
+            conditions.append((True, 'high'))
+    else:
+        # Normal: signal ON trials are 50% high, 50% low
+        high_temp_count = signal_on_count // 2
+        low_temp_with_signal_count = signal_on_count - high_temp_count
+        
+        # Add signal ON trials
+        for _ in range(high_temp_count):
+            conditions.append((True, 'high'))
+        for _ in range(low_temp_with_signal_count):
+            conditions.append((True, 'low'))
+    
+    # 50% signal OFF, all with low temp
+    signal_off_count = m - signal_on_count
+    for _ in range(signal_off_count):
+        conditions.append((False, 'low'))
+    
+    # Shuffle the conditions
+    random.shuffle(conditions)
+    
+    return conditions
+
+def tense_session(extinction=False):
+    """
+    Tense session implementation.
+    
+    Structure:
+    - Choose group (1=blue rectangle signals on, 2=green rectangle signals on)
+    - Low temp = first temp from pain ratings
+    - High temp = second temp from pain ratings
+    - n rounds, each with m trials
+    - Each round: 50% signal ON, 50% signal OFF
+      - If extinction=False (normal):
+        - Signal ON: 50% high temp, 50% low temp
+        - Signal OFF: 100% low temp
+      - If extinction=True:
+        - Signal ON: 100% high temp
+        - Signal OFF: 100% low temp
+    - Each trial: fixation cross -> colored rectangle -> pain stimulus
+    
+    Args:
+        extinction: If True, all signal ON trials use high temperature
+    """
+    # Get group selection (1=blue signals on, 2=green signals on)
+    tense_group = exp_info.get('tense_group', 1)
+    signal_color = 'blue' if tense_group == 1 else 'green'
+    off_color = 'green' if tense_group == 1 else 'blue'  # Opposite color for signal OFF
+    
+    # Load pain rating temperatures
+    rate_temps = log.load_session_trials_data(session_type="pain_rating")
+    rate_temps = [float(temp) for temp in rate_temps]
+    
+    # First temp = low, second temp = high
+    if len(rate_temps) < 2:
+        cp.print_error("Need at least 2 temperatures from pain_rating session")
+        return
+    
+    low_temp = rate_temps[0]
+    high_temp = rate_temps[1]
+    
+    log_info(f"Tense session - Group: {tense_group} ({signal_color}), Low temp: {low_temp}, High temp: {high_temp}")
+    
+    # Generate wait times for all trials
+    intervals = generate_wait_times(trails_number=num_trails)
+    
+    # Start instructions screen
+    draw.blank()
+    draw.top_instructions("A pain stimulus will be applied to your hand.")
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
+    wait_for_space_or_escape()
+    
+    draw.top_instructions("starting session...")
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
+    
+    # Start medoc program
+    medoc.start_thermal_program()
+    medoc.skip_initial_pain_stimulus()
+    
+    draw.fixation_cross()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.show()
+    
+    # Run rounds
+    trial_num = 1
+    interval_idx = 0
+    
+    for round_num in range(config.tense_num_rounds):
+        log_info(f"Starting round {round_num + 1}/{config.tense_num_rounds}")
+        
+        # Generate trial conditions for this round
+        trial_conditions = generate_tense_trial_conditions(config.tense_trials_per_round, extinction=extinction)
+        
+        # Run trials in this round
+        for signal_on, temp_type in trial_conditions:
+            # Determine temperature
+            temperature = high_temp if temp_type == 'high' else low_temp
+            
+            # Determine rectangle color: signal color if signal_on, off color if signal_off
+            rectangle_color = signal_color if signal_on else off_color
+            
+            # Show colored rectangle (draw first so it's behind the cross)
+            draw.colored_rectangle(color=rectangle_color, opacity=0.3)
+            
+            # Show fixation cross (draw after rectangle so it's on top)
+            draw.fixation_cross()
+            
+            draw.show()
+            
+            # Wait for interval
+            wait(intervals[interval_idx])
+            interval_idx += 1
+            
+            # Keep rectangle visible during pain stimulus - redraw it
+            draw.colored_rectangle(color=rectangle_color, opacity=0.3)
+            draw.fixation_cross()
+            draw.show()
+            
+            # Apply pain stimulus
+            medoc.pain_stimulus_trial(temperature=temperature)
+            
+            # Pain rating after each trial
+            draw.blank()
+            draw.show()
+            pain_rating, reaction_time = expirimentUtils.pain_vas(
+                win, 
+                timeout=config.vas_timeout,
+                instructions="Please rate the pain you just experienced"
+            )
+            
+            # Log VAS rating event
+            if pain_rating is not None:
+                log.event(config.vas_rating_msg, event_data={'rating': pain_rating})
+            
+            # Wait for space after rating
+            draw.blank()
+            draw.instructions("Press SPACE to continue")
+            draw.show()
+            wait_for_space_or_escape()
+            
+            # Log trial data (including pain rating)
+            log.trial(
+                trial_number=trial_num,
+                wait_time=intervals[interval_idx - 1],
+                temperature=temperature,
+                pain_rating=pain_rating,
+                reaction_time=reaction_time,
+                round_number=round_num + 1,
+                signal_on=signal_on,
+                temp_type=temp_type
+            )
+            
+            trial_num += 1
+        
+        # Rest period after each round (except the last round)
+        if round_num < config.tense_num_rounds - 1:
+            draw.blank()
+            draw.instructions("Rest period - adjust the thermod position")
+            draw.show()
+            log.event(config.rest_start_msg)
+            wait(2, log_medoc=False)  # 2 second rest period
+            
+            draw.blank()
+            draw.instructions("Press SPACE to continue to the next round")
+            draw.show()
+            log.event(config.rest_end_msg)
+            wait_for_space_or_escape()
+    
+    medoc.stop()  # Stop medoc program
+
+# ==============================================
+# TENSE EXTINCTION SESSION
+# ==============================================
+
+def tense_extinct_session():
+    """
+    Tense extinction session - same as tense session but with extinction=True.
+    In extinction mode, all signal ON trials use high temperature.
+    """
+    tense_session(extinction=True)
 
 # ==============================================
 # PLR SESSION
@@ -489,6 +703,10 @@ if __name__ == "__main__":
         custom_session()
     elif curr_session.startswith("plr"):
         plr_session()
+    elif curr_session.startswith("tense_extinct"):
+        tense_extinct_session()
+    elif curr_session.startswith("tense"):
+        tense_session()
     finish_session()
 
 

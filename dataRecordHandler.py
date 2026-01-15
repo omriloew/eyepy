@@ -74,8 +74,15 @@ class DataRecordHandler:
         if os.path.exists(filepath):
             with open(filepath, 'r') as csvfile:
                 reader = csv.DictReader(csvfile)
+                i = 0
+                sum = 0
                 for row in reader:
-                    temperature_data.append(row['temperature'])
+                    tmp = float(row['temperature'])
+                    sum += tmp
+                    if i%config.pain_rating_each_tmp_rep_num == 0:
+                        temperature_data.append(sum / config.pain_rating_each_tmp_rep_num)
+                        sum = 0
+                    i += 1
         else:
             temperature_data = config.manual_temperature_data[session_type]
         print_log(f"Loaded temperature data: {temperature_data}")

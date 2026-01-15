@@ -16,6 +16,10 @@ medoc_programs = {
     'cpm_demo': '00010001',
     'custom': '00010001',
     'custom_demo': '00010001',
+    'tense': '00010001',
+    'tense_demo': '00010001',
+    'tense_extinct': '00010001',
+    'tense_extinct_demo': '00010001',
 }
 medoc_base_temperature = 32.0
 
@@ -27,12 +31,12 @@ video_camera_on = 0
 # ==============================================
 # LED PARAMETERS
 # ==============================================
-led_on = 1
+led_on = 0
 led_baud_rate = 9600
 led_timeout = 1
-led_on_duration_in_sec = 3
+led_on_duration_in_sec = 1
 led_num_flashes = 3
-led_interval_in_sec = 0.3
+led_interval_in_sec = 1
 
 # ==============================================
 # EYELINK PARAMETERS
@@ -54,41 +58,51 @@ is_hebrew = 0
 debug = True
 manual_threshold_temperature_data = [40.0, 32.0, 36.0, 44.0, 48.0]
 manual_pain_rating_temperature_data = [40.0, 32.0, 36.0, 44.0, 48.0]
+
 manual_temperature_data = {
     'threshold': manual_threshold_temperature_data,
     'pain_rating': manual_pain_rating_temperature_data,
 }
 desired_ratings = [20, 40, 60]
 each_tmp_rep_num = 4
-break_points_main_session = [5, 10]
-threshold_reduction_factor = 2
+num_main_rounds = 4
+pain_rating_each_tmp_rep_num = 3
+tense_num_rounds = 4
+tense_trials_per_round = 8
 trail_dur_sec = {
     'main': 15,
-    'cpm': 30
+    'cpm': 30,
+    'tense': 15,
+    'tense_extinct': 15,
 }
 num_trails = {
     'threshold': 4,
-    'pain_rating': len(desired_ratings),
-    'main': (len(desired_ratings) + 1) * each_tmp_rep_num,
+    'pain_rating': len(desired_ratings) * pain_rating_each_tmp_rep_num ,
+    'main': len(desired_ratings) * each_tmp_rep_num * num_main_rounds,
     'cpm': 2,
-    'plr' : 10,
+    'plr' : 5,
     'custom': 0,
+    'tense': tense_num_rounds * tense_trials_per_round,
+    'tense_extinct': tense_num_rounds * tense_trials_per_round,
     'threshold_demo': 3,
     'main_demo': 3,
     'pain_rating_demo': 3,
     'custom_demo': 0,
     'cpm_demo': 3,
+    'tense_demo': 3,
+    'tense_extinct_demo': 3,
 }
 
 # ==============================================
 # VAS (Visual Analog Scale) parameters
 # ==============================================
-vas_max = 100  # Maximum value on the scale
+vas_max = 10  # Maximum value on the scale
 vas_min = 0  # Minimum value on the scale
-vas_granularity = 1  # Step size for the scale
-vas_keyboard_step = 1  # How much to jump when using arrow keys
-vas_start_value = 50  # Starting position of the slider
+vas_granularity = 0.5  # Step size for the scale
+vas_keyboard_step = 0.5  # How much to jump when using arrow keys
+vas_start_value = 5  # Starting position of the slider
 vas_timeout = None  # Timeout in seconds
+vas_show_value = True  # Show numeric value on VAS scale
 vas_marker_style = 'slider'  # Options: 'slider', 'circle', 'triangle', 'glow'
 vas_marker_color = 'red'  # Color of the marker/cursor
 
@@ -123,11 +137,12 @@ exp_info = {
     'participant': (participent),
     'session_number': (session_number),
     'gender': ('male', 'female', 'other'),
-    'session': ('threshold', 'pain_rating' , 'main', 'cpm', 'custom'),
+    'session': ('threshold', 'pain_rating' , 'main', 'cpm', 'custom', 'plr', 'tense', 'tense_extinct'),
     'age': '',
     'dominant eye': ('right', 'left', 'both'),
     'left-handed': False,
     'demo': False,
+    'tense_group': (1, 2),  # 1=blue rectangle signals on, 2=green rectangle signals on
 }
 
 # ==============================================

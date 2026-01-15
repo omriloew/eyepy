@@ -194,9 +194,12 @@ class Medoc:
 
     def pain_stimulus_trial(self, temperature: float):
         print_medoc_log(f"Pain stimulus trial at temperature: {temperature}")
-        t_up = temperature - self.last_temp 
+        temp_delta = temperature - self.last_temp 
         self.last_temp = temperature
-        self.t_up(t_up)
+        if temp_delta >= 0:
+            self.t_up(temp_delta)
+        else:
+            self.t_down(abs(temp_delta))
         self.wait(0.2)
         self.trigger()
         self.wait(1)
