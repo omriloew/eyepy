@@ -14,21 +14,26 @@ always_keep_cols = ['time_stamp', 'event_label'] #DO NOT CHANGE THIS
 #===============================================
 # events configuration
 #===============================================
-events_csv_path = '2/4/threshold/omer_threshold_events.csv'
+events_csv_path = '10/threshold/omer_threshold_events.csv'
 keep_events_cols = ['_event_code']
 #===============================================
 # swir configuration
 #===============================================
 process_swir = True
-swir_csv_path = '2/4/threshold/roi_intensity_results_th4.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
+swir_csv_path = '10/threshold/roi_intensity_results_TH10.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
 keep_swir_cols = ['frame', 'dyn_intensity', 'dyn_darkness', 'stat_intensity', 'stat_darkness', 'roi_update']
 swir_scale_factors = {'dyn_intensity': 100, 'dyn_darkness': 100}  # Multipliers for SWIR columns: {'column_name': multiplier}
 swir_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -13500.0}  # Drift/offset for SWIR columns: {'column_name': offset_value}
+# LED event detection intervals: only detect events within these time ranges (in seconds)
+# Format: list of tuples [(start1, end1), (start2, end2), ...]
+# Events outside these intervals will be ignored
+swir_led_detection_intervals = [(80.0, 110.0), (220.0, 240.0)]  # Example: only detect events between 20s and 93s
+swir_led_threshold_multiplier = 3  # Threshold multiplier for LED event detection (higher = more strict)
 #===============================================
 # medoc configuration
 #===============================================
 process_medoc = True
-medoc_csv_path = '2/4/threshold/omer_threshold_medoc_events.csv'
+medoc_csv_path = '10/threshold/omer_threshold_medoc_events.csv'
 keep_medoc_cols = ['temperature_c']
 medoc_scale_factors = {'temperature_c': 100.0}  # Multipliers for MEDOC columns: {'column_name': multiplier}
 medoc_drift_factors = {}  # Drift/offset for MEDOC columns: {'column_name': offset_value}
@@ -44,7 +49,7 @@ eeg_drift_factors = {}  # Drift/offset for EEG columns: {'column_name': offset_v
 # eyelink configuration 
 #===============================================
 process_eyelink = True
-eyelink_file_path = '2/4/threshold/test.edf'
+eyelink_file_path = '10/threshold/test.edf'
 keep_eyelink_cols = ['ps']
 eyelink_scale_factors = {'xpos': 1.0, 'ypos': 1.0, 'ps': 1.0}  # Multipliers for Eyelink columns: {'column_name': multiplier}
 eyelink_drift_factors = {}  # Drift/offset for Eyelink columns: {'column_name': offset_value}
@@ -56,9 +61,9 @@ output_dir = 'post_exp_raw_process_results'
 #===============================================
 # session configuration
 #===============================================
-session_type = 'main'
-participant_id = 'omri'
-session_number = '1'
+session_type = 'pain_rating'
+participant_id = 'omer'
+session_number = '10'
 #===============================================
 # synchronization configuration
 #===============================================
@@ -66,7 +71,7 @@ sychronize_to = 'SWIR'
 #===============================================
 # visualization configuration
 #===============================================
-columns_to_exclude_from_plot = ['frame_index', 'frame', 'roi_update', 'stat_darkness']  # Columns to exclude from final visualization
+columns_to_exclude_from_plot = ['frame_index', 'frame', 'roi_update', 'stat_darkness', 'dyn_intensity']  # Columns to exclude from final visualization
 # Additional CSV to plot alongside synced data (optional)
 # CSV should have 'time_sec' column (will be matched to 'time_stamp' in synced data)
 additional_csv_to_plot = NONE # Set to CSV file path or None to skip
@@ -120,7 +125,6 @@ def swir_csv_to_df(session_output_dir=None, output_csv_sufix=None, swir_csv_path
     swir_df['event_label'] = ''
     
     # Extract LED events from stat_intensity column
-    save_plot_path = f'{session_output_dir}/light_events.png' if session_output_dir else None
     intensity_array = swir_df['stat_intensity'].values
     time_stamps = swir_df['time_stamp'].values
     
@@ -128,7 +132,11 @@ def swir_csv_to_df(session_output_dir=None, output_csv_sufix=None, swir_csv_path
     light_events_indices = vp.extract_light_events_from_intensity(
         intensity_array, 
         time_stamps, 
-        save_plot_path=save_plot_path
+        do_plot=True,
+        show_plot=True,
+        save_plot_path=None,
+        detection_intervals=swir_led_detection_intervals,
+        threshold_multiplier=swir_led_threshold_multiplier
     )
     led_on_indices = light_events_indices[0]  # LED_ON row indices
     led_off_indices = light_events_indices[1]  # LED_OFF row indices
@@ -388,7 +396,9 @@ def main():
         reference_name=sychronize_to,
         devices=devices,
         df_E=events_df,
-        window_ms=30.0
+        window_ms=30.0,
+        plot_led_events=True,
+        plot_dir=session_output_dir
     )
 
     # Save each individual device's synced DataFrame

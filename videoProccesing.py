@@ -238,7 +238,9 @@ def extract_light_events_time(_video_path, do_plot=True, show_plot=False, save_p
     return lights_on_events, lights_off_events
 
 
-def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=True, show_plot=False, save_plot_path=None):
+def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=True, show_plot=False, 
+                                         save_plot_path=None, detection_intervals=None, 
+                                         threshold_multiplier=4.5):
     """
     Extract LED ON/OFF events from stat_intensity column (similar to extract_light_events_time but for 1D array).
     
@@ -248,6 +250,10 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
         do_plot: Whether to create a plot
         show_plot: Whether to display the plot
         save_plot_path: Optional path to save the plot
+        detection_intervals: List of tuples [(start1, end1), (start2, end2), ...] specifying time ranges
+                           (in seconds) where LED events should be detected. Events outside these intervals
+                           will be ignored. If None, detects events in the entire signal.
+        threshold_multiplier: Multiplier for the detection threshold (higher = more strict, default 4.5)
     
     Returns:
         Tuple of (lights_on_indices, lights_off_indices) as numpy arrays
@@ -280,16 +286,36 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
         start_padding = max(1, total_frames // 10)  # Use 10% if too large
         end_padding = max(1, total_frames // 10)
     
-    # Use a smaller slice just for computing statistics (exclude noisy start/end)
-    derivative_slicing = slice(start_padding, -end_padding if end_padding > 0 else None)
-    mean_intensity = intensity_derivative[derivative_slicing].mean()
-    std_intensity = intensity_derivative[derivative_slicing].std()
-    # Use higher threshold (3.5*std) to reduce false positives
-    intensity_threshold = mean_intensity + 3.5 * std_intensity
+    # Create a mask for valid detection intervals
+    total_frames = len(intensity_derivative)
+    valid_mask = np.zeros(total_frames, dtype=bool)
     
-    # Search in the FULL array (don't exclude end, just exclude very noisy start)
-    derivative_peaks_slicing = slice(start_padding, None)  # Only exclude start, not end
-    search_array = intensity_derivative[derivative_peaks_slicing]
+    if detection_intervals is not None and len(detection_intervals) > 0:
+        # Convert time intervals to frame indices
+        for interval_start, interval_end in detection_intervals:
+            # Find frame indices within this interval
+            interval_mask = (time_stamps >= interval_start) & (time_stamps <= interval_end)
+            valid_mask |= interval_mask
+    else:
+        # If no intervals specified, use default padding (exclude noisy start/end)
+        valid_mask[start_padding:total_frames - end_padding] = True
+    
+    # Find the first and last valid indices for statistics calculation
+    valid_indices = np.where(valid_mask)[0]
+    if len(valid_indices) == 0:
+        # Fallback: use default padding if no valid intervals
+        valid_mask[start_padding:total_frames - end_padding] = True
+        valid_indices = np.where(valid_mask)[0]
+    
+    # Use valid region for computing statistics
+    mean_intensity = intensity_derivative[valid_indices].mean()
+    std_intensity = intensity_derivative[valid_indices].std()
+    # Use configurable threshold multiplier (default 4.5, higher = more strict)
+    intensity_threshold = mean_intensity + threshold_multiplier * std_intensity
+    
+    # Search only in valid intervals
+    search_array = intensity_derivative[valid_mask]
+    search_indices = np.where(valid_mask)[0]  # Original indices for mapping back
     light_duration_and_interval_in_seconds = 3
     frames_peak_to_peak = light_duration_and_interval_in_seconds * fps
     
@@ -313,8 +339,8 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
                                       prominence=0.2 * std_intensity)
             
             if events.size >= 3:
-                # Adjust indices back to full array coordinates
-                return events + start_padding
+                # Map events back to original array indices
+                return search_indices[events]
             
             # Moderate threshold reduction
             if _intensity_threshold > mean_intensity + 0.5 * std_intensity:
@@ -340,25 +366,125 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
         lights_off_events = lights_off_events[:max_events]  # Take first 6
     
     if do_plot:
-        p1, = plt.plot(intensity_derivative, label='derivative')
-        plt.axhline(intensity_threshold, linestyle='--')
-        plt.axhline(-intensity_threshold, linestyle='--')
-        plt.scatter(lights_on_events, intensity_derivative[lights_on_events], label='lights on')
-        plt.scatter(lights_off_events, intensity_derivative[lights_off_events], label='lights off')
-        ax = plt.gca()
-        twin_ax = ax.twinx()
-        p2, = twin_ax.plot(intensity_filtered, c='tab:purple', label='intensity (filtered)')
-        twin_ax.legend(loc='lower right')
-        twin_ax.tick_params(axis='y', colors=p2.get_color())
-        ax.set_title('Intensity Derivative')
-        ax.set_xlabel('frame index')
-        ax.set_ylabel('intensity derivative')
-        ax.legend(loc='upper right')
-        if save_plot_path is not None:
-            plt.savefig(save_plot_path)
-            plt.close()
-        elif show_plot:
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+        
+        # Plot 1: Intensity and detected events over time
+        time_array = time_stamps
+        ax1.plot(time_array, intensity_filtered, 'b-', label='Intensity (filtered)', linewidth=1.5, alpha=0.7)
+        ax1.plot(time_array, intensity_array, 'gray', label='Intensity (raw)', linewidth=0.5, alpha=0.3)
+        
+        # Mark detection intervals (valid regions) and ignored regions
+        if detection_intervals is not None and len(detection_intervals) > 0:
+            # Show valid detection intervals in green
+            for i, (interval_start, interval_end) in enumerate(detection_intervals):
+                ax1.axvspan(interval_start, interval_end, alpha=0.15, color='green', 
+                           label='Detection Interval' if i == 0 else '')
+            
+            # Show ignored regions (everything outside intervals) in yellow
+            intervals_sorted = sorted(detection_intervals)
+            # Before first interval
+            if intervals_sorted[0][0] > time_array[0]:
+                ax1.axvspan(time_array[0], intervals_sorted[0][0], alpha=0.2, color='yellow', 
+                           label='Ignored Region')
+            # Between intervals
+            for i in range(len(intervals_sorted) - 1):
+                if intervals_sorted[i][1] < intervals_sorted[i+1][0]:
+                    ax1.axvspan(intervals_sorted[i][1], intervals_sorted[i+1][0], alpha=0.2, color='yellow')
+            # After last interval
+            if intervals_sorted[-1][1] < time_array[-1]:
+                ax1.axvspan(intervals_sorted[-1][1], time_array[-1], alpha=0.2, color='yellow')
+        else:
+            # If no intervals specified, show default padding regions as ignored
+            if start_padding > 0:
+                ignore_start_time = time_array[start_padding] if start_padding < len(time_array) else time_array[0]
+                ax1.axvspan(time_array[0], ignore_start_time, alpha=0.2, color='yellow', label='Ignored (start)')
+            if end_padding > 0:
+                ignore_end_time = time_array[-end_padding] if end_padding < len(time_array) else time_array[-1]
+                ax1.axvspan(ignore_end_time, time_array[-1], alpha=0.2, color='yellow', label='Ignored (end)')
+        
+        # Mark LED_ON events
+        if len(lights_on_events) > 0:
+            led_on_times = time_array[lights_on_events]
+            led_on_intensities = intensity_filtered[lights_on_events]
+            ax1.scatter(led_on_times, led_on_intensities, c='green', s=150, marker='^', 
+                       label=f'LED_ON ({len(lights_on_events)} events)', zorder=5, edgecolors='black', linewidths=1.5)
+            for i, (t, val) in enumerate(zip(led_on_times, led_on_intensities)):
+                ax1.annotate(f'ON{i+1}', (t, val), xytext=(5, 10), textcoords='offset points', 
+                           fontsize=9, fontweight='bold', color='green')
+        
+        # Mark LED_OFF events
+        if len(lights_off_events) > 0:
+            led_off_times = time_array[lights_off_events]
+            led_off_intensities = intensity_filtered[lights_off_events]
+            ax1.scatter(led_off_times, led_off_intensities, c='red', s=150, marker='v', 
+                       label=f'LED_OFF ({len(lights_off_events)} events)', zorder=5, edgecolors='black', linewidths=1.5)
+            for i, (t, val) in enumerate(zip(led_off_times, led_off_intensities)):
+                ax1.annotate(f'OFF{i+1}', (t, val), xytext=(5, -15), textcoords='offset points', 
+                           fontsize=9, fontweight='bold', color='red')
+        
+        ax1.set_xlabel('Time (seconds)', fontsize=12)
+        ax1.set_ylabel('Intensity', fontsize=12)
+        ax1.set_title('LED Events Detection from SWIR Intensity', fontsize=14, fontweight='bold')
+        ax1.legend(loc='upper right', fontsize=10)
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Derivative with thresholds
+        ax2.plot(time_array, intensity_derivative, 'b-', label='Intensity Derivative', linewidth=1.5)
+        ax2.axhline(intensity_threshold, linestyle='--', color='orange', linewidth=2, label=f'Threshold (+{intensity_threshold:.2f})')
+        ax2.axhline(-intensity_threshold, linestyle='--', color='orange', linewidth=2, label=f'Threshold (-{intensity_threshold:.2f})')
+        ax2.axhline(0, linestyle='-', color='black', linewidth=0.5, alpha=0.3)
+        
+        # Mark detection intervals and ignored regions in derivative plot too
+        if detection_intervals is not None and len(detection_intervals) > 0:
+            # Show valid detection intervals in green
+            for interval_start, interval_end in detection_intervals:
+                ax2.axvspan(interval_start, interval_end, alpha=0.15, color='green')
+            
+            # Show ignored regions in yellow
+            intervals_sorted = sorted(detection_intervals)
+            if intervals_sorted[0][0] > time_array[0]:
+                ax2.axvspan(time_array[0], intervals_sorted[0][0], alpha=0.2, color='yellow')
+            for i in range(len(intervals_sorted) - 1):
+                if intervals_sorted[i][1] < intervals_sorted[i+1][0]:
+                    ax2.axvspan(intervals_sorted[i][1], intervals_sorted[i+1][0], alpha=0.2, color='yellow')
+            if intervals_sorted[-1][1] < time_array[-1]:
+                ax2.axvspan(intervals_sorted[-1][1], time_array[-1], alpha=0.2, color='yellow')
+        else:
+            # Default padding regions
+            if start_padding > 0:
+                ignore_start_time = time_array[start_padding] if start_padding < len(time_array) else time_array[0]
+                ax2.axvspan(time_array[0], ignore_start_time, alpha=0.2, color='yellow')
+            if end_padding > 0:
+                ignore_end_time = time_array[-end_padding] if end_padding < len(time_array) else time_array[-1]
+                ax2.axvspan(ignore_end_time, time_array[-1], alpha=0.2, color='yellow')
+        
+        # Mark detected peaks in derivative
+        if len(lights_on_events) > 0:
+            led_on_times = time_array[lights_on_events]
+            led_on_derivatives = intensity_derivative[lights_on_events]
+            ax2.scatter(led_on_times, led_on_derivatives, c='green', s=150, marker='^', 
+                      label='LED_ON peaks', zorder=5, edgecolors='black', linewidths=1.5)
+        
+        if len(lights_off_events) > 0:
+            led_off_times = time_array[lights_off_events]
+            led_off_derivatives = intensity_derivative[lights_off_events]
+            ax2.scatter(led_off_times, led_off_derivatives, c='red', s=150, marker='v', 
+                       label='LED_OFF peaks', zorder=5, edgecolors='black', linewidths=1.5)
+        
+        ax2.set_xlabel('Time (seconds)', fontsize=12)
+        ax2.set_ylabel('Intensity Derivative', fontsize=12)
+        ax2.set_title('Derivative with Detection Thresholds', fontsize=14, fontweight='bold')
+        ax2.legend(loc='upper right', fontsize=10)
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if show_plot:
             plt.show()
+        elif save_plot_path is not None:
+            plt.savefig(save_plot_path, dpi=150, bbox_inches='tight')
+            print(f"LED events plot saved to: {save_plot_path}")
+            plt.close()
         else:
             plt.close()
     
