@@ -115,6 +115,7 @@ def pain_vas(win, timeout=config.vas_timeout, instructions=None):
         color=config.txt_color,
         markerColor=config.vas_marker_color,
         style=config.vas_marker_style,
+        font='Open Sans'
     )
     
     # Create current value text - shows numeric value if enabled
@@ -180,14 +181,16 @@ def pain_vas(win, timeout=config.vas_timeout, instructions=None):
                 if current_value is None:
                     current_value = config.vas_start_value
                 new_value = max(config.vas_min, current_value - config.vas_keyboard_step)
-                vas_slider.setRating(new_value)
+                vas_slider.markerPos = new_value
+                vas_slider.rating = new_value
             elif 'right' in keys:
                 # Move right (increase rating)
                 current_value = vas_slider.getRating()
                 if current_value is None:
                     current_value = config.vas_start_value
                 new_value = min(config.vas_max, current_value + config.vas_keyboard_step)
-                vas_slider.setRating(new_value)
+                vas_slider.markerPos = new_value
+                vas_slider.rating = new_value
             elif 'space' in keys or 'return' in keys:
                 # Confirm selection
                 break

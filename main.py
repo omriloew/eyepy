@@ -115,8 +115,8 @@ def finish_session():
     if not_demo:
         draw.instructions("finishing session...")
         draw.show()
-        el.stop_recording()     
         log.finish_session()
+        el.stop_recording()
         summary = log.get_summary()
         cp.print_session("\n=== Session Summary ===")
         for key, value in summary.items():
@@ -601,7 +601,7 @@ def tense_session(extinction=False):
             pain_rating, reaction_time = expirimentUtils.pain_vas(
                 win, 
                 timeout=config.vas_timeout,
-                instructions="Please rate the pain you just experienced"
+                instructions="Please rate the pain you just experienced",
             )
             
             # Log VAS rating event
@@ -688,6 +688,21 @@ def plr_session():
     log.event(config.rest_end_msg)
     wait(2, log_medoc=False)  # 2 second rest period at end
 
+def cpm_dual_session():
+    draw.blank()
+    draw.top_instructions("A pain stimulus will be applied to your hand.")
+    draw.fixation_cross()
+    draw.bottom_instructions("press SPACE to continue")
+    draw.show()
+    wait_for_space_or_escape()
+    draw.blank()
+    draw.bottom_instructions("Please fixate on the cross")
+    draw.fixation_cross()
+    draw.top_instructions("press SPACE when session done")
+    draw.show()
+    medoc.start_thermal_program()
+    wait_for_space_or_escape()
+
 
 if __name__ == "__main__":
     start_session()
@@ -697,8 +712,6 @@ if __name__ == "__main__":
         main_session()
     elif curr_session.startswith("pain_rating"):
         pain_rating_session()
-    elif curr_session.startswith("cpm"):
-        cpm_session()
     elif curr_session.startswith("custom"):
         custom_session()
     elif curr_session.startswith("plr"):
@@ -707,6 +720,8 @@ if __name__ == "__main__":
         tense_extinct_session()
     elif curr_session.startswith("tense"):
         tense_session()
+    elif curr_session.startswith("cpm_dual"):
+        cpm_dual_session()
     finish_session()
 
 

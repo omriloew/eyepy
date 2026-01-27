@@ -14,13 +14,13 @@ always_keep_cols = ['time_stamp', 'event_label'] #DO NOT CHANGE THIS
 #===============================================
 # events configuration
 #===============================================
-events_csv_path = '10/threshold/omer_threshold_events.csv'
+events_csv_path = 'log_files/omer/10/plr/omer_plr_events.csv'
 keep_events_cols = ['_event_code']
 #===============================================
 # swir configuration
 #===============================================
 process_swir = True
-swir_csv_path = '10/threshold/roi_intensity_results_TH10.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
+swir_csv_path = 'log_files/omer/10/plr/roi_intensity_results_PLR1.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
 keep_swir_cols = ['frame', 'dyn_intensity', 'dyn_darkness', 'stat_intensity', 'stat_darkness', 'roi_update']
 swir_scale_factors = {'dyn_intensity': 100, 'dyn_darkness': 100}  # Multipliers for SWIR columns: {'column_name': multiplier}
 swir_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -13500.0}  # Drift/offset for SWIR columns: {'column_name': offset_value}
@@ -32,16 +32,16 @@ swir_led_threshold_multiplier = 3  # Threshold multiplier for LED event detectio
 #===============================================
 # medoc configuration
 #===============================================
-process_medoc = True
-medoc_csv_path = '10/threshold/omer_threshold_medoc_events.csv'
+process_medoc = False
+medoc_csv_path = 'log_files/omer/10/threshold/omer_threshold_medoc_events.csv'
 keep_medoc_cols = ['temperature_c']
 medoc_scale_factors = {'temperature_c': 100.0}  # Multipliers for MEDOC columns: {'column_name': multiplier}
 medoc_drift_factors = {}  # Drift/offset for MEDOC columns: {'column_name': offset_value}
 #===============================================
 # eeg configuration
 #===============================================
-process_eeg = False
-eeg_file_path = 'rawFilesToTestWith/STM_Visualization_Clean_v2_EN.ipynb.edf'
+process_eeg = True
+eeg_file_path = 'log_files/omer/10/plr/PLR_1_20260115_113336.mff'
 keep_eeg_cols = []
 eeg_scale_factors = {}  # Multipliers for EEG columns: {'column_name': multiplier}
 eeg_drift_factors = {}  # Drift/offset for EEG columns: {'column_name': offset_value}
@@ -49,7 +49,7 @@ eeg_drift_factors = {}  # Drift/offset for EEG columns: {'column_name': offset_v
 # eyelink configuration 
 #===============================================
 process_eyelink = True
-eyelink_file_path = '10/threshold/test.edf'
+eyelink_file_path = 'log_files/omer/10/plr/test.edf'
 keep_eyelink_cols = ['ps']
 eyelink_scale_factors = {'xpos': 1.0, 'ypos': 1.0, 'ps': 1.0}  # Multipliers for Eyelink columns: {'column_name': multiplier}
 eyelink_drift_factors = {}  # Drift/offset for Eyelink columns: {'column_name': offset_value}
@@ -61,7 +61,7 @@ output_dir = 'post_exp_raw_process_results'
 #===============================================
 # session configuration
 #===============================================
-session_type = 'pain_rating'
+session_type = 'th'
 participant_id = 'omer'
 session_number = '10'
 #===============================================
@@ -189,7 +189,7 @@ def get_eyelink_df(eyelink_file_path, session_output_dir=None, output_csv_sufix=
 def get_eeg_df(eeg_file_path):
     print("================================================")
     cp.colored_print("== Converting EEG EDF to DataFrame ==", color=cp.Fore.CYAN)
-    df = edf.edf_to_df(eeg_file_path)
+    df = edf.export_emg_leg_csv(eeg_file_path,output_dir + "/eeg.csv")
     cp.colored_print(f"EEG DataFrame: {df.head()}", color=cp.Fore.BLUE)
     print("================================================")
     print(df.head())
@@ -363,14 +363,12 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, drift_factors=No
         ax.legend(handles, labels, loc='best', fontsize=8)
     else:
         ax.legend(loc='best', fontsize=8)
-    
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Plot saved to: {save_path}")
     plt.tight_layout()
     plt.show()
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Plot saved to: {save_path}")
-    else:
-        plt.show()
+
 
 def main():
     # Configure paths
@@ -483,17 +481,6 @@ def main():
     plot_df_in_time(synced_df, columns_to_plot=plot_cols, scale_factors=scale_factors, drift_factors=drift_factors, df_name="SYNCED COMBINED", save_path=plot_save_path)
     
     print(f"Mappings: {mappings}")
-
-
-def test():
-    medoc_df = get_medoc_df('log_files/omri/1/main/omri_main_medoc_events.csv')
-    events_df = get_events_df('log_files/omri/1/main/omri_main_events.csv')
-    plot_df_in_time(events_df,df_name="EVENTS")
-    plot_df_in_time(medoc_df, columns_to_plot=["temperature_c"], df_name="MEDOC")
-    swir_df = swir_csv_to_df(swir_csv_path=swir_csv_path)
-    plot_df_in_time(swir_df, df_name="SWIR")
-    eyelink_df = get_eyelink_df(eyelink_file_path)
-    plot_df_in_time(eyelink_df, columns_to_plot=["xpos", "ypos", "ps"], df_name="EYELINK")
     
 
 if __name__ == "__main__":

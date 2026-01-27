@@ -74,7 +74,7 @@ class DataRecordHandler:
         if os.path.exists(filepath):
             with open(filepath, 'r') as csvfile:
                 reader = csv.DictReader(csvfile)
-                i = 0
+                i = 1
                 sum = 0
                 for row in reader:
                     tmp = float(row['temperature'])

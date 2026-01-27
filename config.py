@@ -2,7 +2,7 @@
 # ==============================================
 # MEDOC PARAMETERS
 # ==============================================
-medoc_on = 0
+medoc_on = 1
 medoc_host = '192.168.1.10'
 medoc_port = 20121
 medoc_programs = {
@@ -16,17 +16,13 @@ medoc_programs = {
     'cpm_demo': '00010001',
     'custom': '00010001',
     'custom_demo': '00010001',
-    'tense': '00010001',
+    'tense': '01010000',
     'tense_demo': '00010001',
-    'tense_extinct': '00010001',
+    'tense_extinct': '01010000',
     'tense_extinct_demo': '00010001',
+    'cpm_dual': '11110000'
 }
 medoc_base_temperature = 32.0
-
-# ==============================================
-# VIDEO CAMERA PARAMETERS
-# ==============================================
-video_camera_on = 0
 
 # ==============================================
 # LED PARAMETERS
@@ -65,9 +61,9 @@ manual_temperature_data = {
 }
 desired_ratings = [20, 40, 60]
 each_tmp_rep_num = 4
-num_main_rounds = 4
+num_main_rounds = 1
 pain_rating_each_tmp_rep_num = 3
-tense_num_rounds = 4
+tense_num_rounds = 1
 tense_trials_per_round = 8
 trail_dur_sec = {
     'main': 15,
@@ -91,6 +87,7 @@ num_trails = {
     'cpm_demo': 3,
     'tense_demo': 3,
     'tense_extinct_demo': 3,
+    'cpm_dual': 3,
 }
 
 # ==============================================
@@ -129,15 +126,15 @@ ir_csv_prefix = 'IR_'
 # ==============================================
 # experiment info
 # ==============================================
-participent = 'omri'
-session_number = '1'
+participent = 'omer'
+session_number = '10'
 
 exp_name = 'eye pain'
 exp_info = {
     'participant': (participent),
     'session_number': (session_number),
     'gender': ('male', 'female', 'other'),
-    'session': ('threshold', 'pain_rating' , 'main', 'cpm', 'custom', 'plr', 'tense', 'tense_extinct'),
+    'session': ('threshold', 'pain_rating' , 'main', 'cpm', 'plr', 'tense', 'tense_extinct','cpm_dual'),
     'age': '',
     'dominant eye': ('right', 'left', 'both'),
     'left-handed': False,
@@ -196,7 +193,7 @@ events = {
 # ==============================================
 
 #screen size
-scrsize = (1024, 768)  # screen size in pixels
+scrsize = (1920, 1080)  # screen size in pixels
 #scrsize = (3840, 2160)  # screen size in pixels -> lab
 #text
 txt_size = scrsize[0]/27  # text size

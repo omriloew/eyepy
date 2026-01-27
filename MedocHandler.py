@@ -119,6 +119,7 @@ class Medoc:
         return self.cmd('T_DOWN', param=float(delta_c))
 
     def wait(self, seconds: float, log_medoc: bool = True):
+        print_medoc_log(f"Waiting {seconds} seconds")
         if log_medoc:
             for i in range(int(seconds*100)):
                 core.wait(0.01)
@@ -190,7 +191,7 @@ class Medoc:
         """
         print_medoc_log("Skipping initial pain stimulus")
         self.trigger(log=False)
-        self.wait(config.trail_dur_sec[config.exp_info['session']] + 1)
+        self.wait(config.trail_dur_sec[config.exp_info['session']] + 1,log_medoc=False)
 
     def pain_stimulus_trial(self, temperature: float):
         print_medoc_log(f"Pain stimulus trial at temperature: {temperature}")
@@ -203,7 +204,7 @@ class Medoc:
         self.wait(0.2)
         self.trigger()
         self.wait(1)
-        self.wait_until_temperature_is_below(config.medoc_base_temperature + 0.5)
+        self.wait_until_temperature_is_below(config.medoc_base_temperature + 0.2)
 
 class Medocplaceholder(Medoc):
 
