@@ -2,7 +2,7 @@
 # ==============================================
 # MEDOC PARAMETERS
 # ==============================================
-medoc_on = 1
+medoc_on = 0
 medoc_host = '192.168.1.10'
 medoc_port = 20121
 medoc_programs = {
@@ -106,11 +106,11 @@ vas_marker_color = 'red'  # Color of the marker/cursor
 # ==============================================
 # intervals generation parameters
 # ==============================================
-intervals_generation_method = "exponential"
-intervals_mean = 1
+intervals_generation_method = "uniform"
+intervals_mean = 5
 intervals_std = 0.5
-intervals_min_time = 0.5
-intervals_max_time = 3
+intervals_min_time = 3
+intervals_max_time = 6
 
 # ==============================================
 # folder paths
