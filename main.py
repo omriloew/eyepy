@@ -606,7 +606,7 @@ def tense_session(extinction=False):
             
             # Log VAS rating event
             if pain_rating is not None:
-                log.event(config.vas_rating_msg, event_data={'rating': pain_rating})
+                log.event(config.vas_rating_msg, event_data={'_rating': pain_rating})
             
             # Wait for space after rating
             draw.blank()
