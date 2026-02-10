@@ -22,7 +22,7 @@ medoc_programs = {
     'tense_extinct_demo': '00010001',
     'cpm_dual': '11110000'
 }
-medoc_base_temperature = 32.0
+medoc_base_temperature = 32.0 # changing this will not change the base temperature, this only reflects what is set in medoc
 
 # ==============================================
 # LED PARAMETERS
@@ -49,7 +49,7 @@ eeg_port_address = 0x03FF8
 # experiment parameters
 # ==============================================
 full_screen = 0
-timeout = 100 
+timeout = 100
 is_hebrew = 0
 debug = True
 manual_threshold_temperature_data = [40.0, 32.0, 36.0, 44.0, 48.0]
@@ -60,19 +60,19 @@ manual_temperature_data = {
     'pain_rating': manual_pain_rating_temperature_data,
 }
 desired_ratings = [20, 40, 60]
-each_tmp_rep_num = 4
-num_main_rounds = 1
-pain_rating_each_tmp_rep_num = 3
-tense_num_rounds = 1
-tense_trials_per_round = 8
-trail_dur_sec = {
+each_tmp_rep_num = 12
+num_main_rounds = 3
+pain_rating_each_tmp_rep_num = 5
+tense_num_rounds = 4
+tense_trials_per_round = 32 #must divied by 4
+trail_dur_sec = { # changing this will not change the actual duration. this only reflect the duration set in medoc
     'main': 15,
     'cpm': 30,
     'tense': 15,
     'tense_extinct': 15,
 }
 num_trails = {
-    'threshold': 4,
+    'threshold': 5,
     'pain_rating': len(desired_ratings) * pain_rating_each_tmp_rep_num ,
     'main': len(desired_ratings) * each_tmp_rep_num * num_main_rounds,
     'cpm': 2,

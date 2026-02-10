@@ -343,7 +343,7 @@ def _add_mff_events_to_df(df: pd.DataFrame, mff_path: str):
         print(f"Loaded {len(events)} events from MFF file")
 
 
-def _read_pns_mff(mff_path: str) -> tuple[pd.DataFrame, float]:
+def _read_pns_mff(mff_path: str):
     """Read PNS MFF from pnsSet.xml + signal1.bin; add time_stamp, event_label; fill events via _add_mff_events_to_df. Returns (df, sampling_rate)."""
     ch_names = _extract_pns_channel_names(mff_path)
     if not ch_names:
