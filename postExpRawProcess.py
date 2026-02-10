@@ -14,13 +14,13 @@ always_keep_cols = ['time_stamp', 'event_label'] #DO NOT CHANGE THIS
 #===============================================
 # events configuration
 #===============================================
-events_csv_path = 'omri2/1/main/omri2_main_events.csv'
+events_csv_path = 'omri2/1/threshold/omri2_threshold_events.csv'
 keep_events_cols = ['_event_code']
 #===============================================
 # swir configuration
 #===============================================
-process_swir = True
-swir_csv_path = 'omri2/1/main/roi_intensity_results_omri_main_simple.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
+process_swir = False
+swir_csv_path = 'omri2/1/threshold/roi_intensity_results_omri2_th_simple.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
 keep_swir_cols = ['frame', 'dyn_intensity', 'dyn_darkness', 'stat_intensity', 'stat_darkness', 'roi_update']
 swir_scale_factors = {'dyn_intensity': 100, 'dyn_darkness': 200}  # Multipliers for SWIR columns: {'column_name': multiplier}
 swir_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -30000.0}  # Drift/offset for SWIR columns: {'column_name': offset_value}
@@ -32,8 +32,8 @@ swir_led_threshold_multiplier = 6  # Threshold multiplier for LED event detectio
 #===============================================
 # medoc configuration
 #===============================================
-process_medoc = True
-medoc_csv_path = 'omri2/1/main/omri2_main_medoc_events.csv'
+process_medoc = False
+medoc_csv_path = 'omri2/1/threshold/omri2_threshold_medoc_events.csv'
 keep_medoc_cols = ['temperature_c']
 medoc_scale_factors = {'temperature_c': 100.0}  # Multipliers for MEDOC columns: {'column_name': multiplier}
 medoc_drift_factors = {'temperature_c': 4000}  # Drift/offset for MEDOC columns: {'column_name': offset_value}
@@ -41,15 +41,15 @@ medoc_drift_factors = {'temperature_c': 4000}  # Drift/offset for MEDOC columns:
 # eeg configuration
 #===============================================
 process_eeg = True
-eeg_file_path = 'PILOT/PPM_MAIN_PILOT_20260203_115754.mff'
+eeg_file_path = 'omri2/1/threshold/PPM_TH_PILOT_20260203_113844.mff'
 keep_eeg_cols = ["E4", "E2"]  # Keep all channels - empty list means keep all. E219, E25, E26 show best blink characteristics
 eeg_scale_factors = {"E4": 10.0, "E2":5.0, "EMG Leg": 0.01}  # Multipliers for EEG columns: {'column_name': multiplier}
 eeg_drift_factors = {"E4": -109000.0, "EMG Leg": 5000.0, "E2": -147000.0}  # Drift/offset for EEG columns: {'column_name': offset_value}
 #===============================================
 # eyelink configuration 
 #===============================================
-process_eyelink = True
-eyelink_file_path = 'omri2/1/main/test.edf'
+process_eyelink = False
+eyelink_file_path = 'omri2/1/threshold/test.edf'
 keep_eyelink_cols = ['ps'] # ps or ps_left or ps_right
 eyelink_scale_factors = {'xpos': 1.0, 'ypos': 1.0, 'ps': 1.0}  # Multipliers for Eyelink columns: {'column_name': multiplier}
 eyelink_drift_factors = {"ps": 4000.0}  # Drift/offset for Eyelink columns: {'column_name': offset_value}
@@ -61,13 +61,13 @@ output_dir = 'post_exp_raw_process_results'
 #===============================================
 # session configuration
 #===============================================
-session_type = 'main'
+session_type = 'th'
 participant_id = 'omri2'
 session_number = '1'
 #===============================================
 # synchronization configuration
 #===============================================
-sychronize_to = 'SWIR'
+sychronize_to = 'EEG'
 # Device-specific time offset corrections (in seconds) to account for processing delays
 # Positive values shift device data forward in time, negative values shift backward
 # These offsets are applied AFTER affine transformation but BEFORE pooling

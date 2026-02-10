@@ -7,7 +7,6 @@ import numpy as np
 import mne
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from mffpy.reader import Reader
 
 import config as config
 
@@ -52,35 +51,10 @@ def _extract_pns_channel_names(mff_dir: str) :
     return uniq or None
 
 
-def mff_pns_to_df(mff_path: str) :
-    r = Reader(mff_path)
-
-    samples = r.get_physical_samples()
-    if "PNSData" not in samples:
-        raise ValueError(f"No PNSData in get_physical_samples(). Keys: {list(samples.keys())}")
-
-    data, t0 = samples["PNSData"]  # data: (n_channels, n_samples)
-
-    if data.ndim != 2:
-        raise ValueError(f"Unexpected PNSData shape: {data.shape}")
-
-    n_channels, n_samples = data.shape
-    sfreq = r.sampling_rates.get("PNSData", None)
-
-    # channel names from pnsSet.xml (best effort)
-    ch_names = _extract_pns_channel_names(mff_path)
-
-    # If extraction returned too many/too few, fall back to generic names
-    if not ch_names or len(ch_names) != n_channels:
-        ch_names = [f"PNS_{i+1}" for i in range(n_channels)]
-
-    df = pd.DataFrame(data.T, columns=ch_names)
-
-    # add time column (seconds) if we know sfreq
-    if sfreq:
-        df.insert(0, "time_sec", (np.arange(n_samples) / float(sfreq)) + float(t0))
-
-    return df, float(sfreq) if sfreq else None
+def mff_pns_to_df(mff_path: str):
+    """PNS MFF to DataFrame using the same custom reader as edf_to_df. Returns (df, sampling_rate)."""
+    df, sfreq = _read_pns_mff(mff_path)
+    return df, sfreq
 
 
 def export_emg_leg_csv(mff_path: str, out_csv: str) -> pd.DataFrame:
@@ -98,10 +72,11 @@ def export_emg_leg_csv(mff_path: str, out_csv: str) -> pd.DataFrame:
         print("Columns:", list(df.columns))
         return df
 
-    df_emg = df[["time_sec"] + cols] if "time_sec" in df.columns else df[cols]
+    time_col = "time_stamp" if "time_stamp" in df.columns else ("time_sec" if "time_sec" in df.columns else None)
+    df_emg = df[[time_col] + cols] if time_col else df[cols]
     df_emg.to_csv(out_csv, index=False)
     print(f"Exported EMG/LEG columns to: {out_csv}")
-    print("Exported columns:", ["time_sec"] + cols if "time_sec" in df.columns else cols)
+    print("Exported columns:", ([time_col] + cols) if time_col else cols)
     return df_emg
 
 EDF2ASC_EXE = r"C:\Program Files (x86)\SR Research\EyeLink\EDF_Access_API\Example\edf2asc.exe"
@@ -354,8 +329,8 @@ def _add_mff_events_to_df(df: pd.DataFrame, mff_path: str):
         print(f"Loaded {len(events)} events from MFF file")
 
 
-def _read_pns_mff(mff_path: str) -> pd.DataFrame:
-    """Read PNS MFF from pnsSet.xml + signal1.bin; add time_stamp, event_label; fill events via _add_mff_events_to_df."""
+def _read_pns_mff(mff_path: str) -> tuple[pd.DataFrame, float]:
+    """Read PNS MFF from pnsSet.xml + signal1.bin; add time_stamp, event_label; fill events via _add_mff_events_to_df. Returns (df, sampling_rate)."""
     ch_names = _extract_pns_channel_names(mff_path)
     if not ch_names:
         raise ValueError(f"No channel names from pnsSet.xml in {mff_path}")
@@ -411,7 +386,7 @@ def _read_pns_mff(mff_path: str) -> pd.DataFrame:
     df["event_label"] = ""
     _add_mff_events_to_df(df, mff_path)
     df = df.iloc[1:].reset_index(drop=True)
-    return df
+    return df, sampling_rate
 
 
 def edf_to_df(file_path: str) -> pd.DataFrame:
@@ -458,7 +433,7 @@ def edf_to_df(file_path: str) -> pd.DataFrame:
             return df
         except Exception as e:
             print(f"MNE could not read as EEG MFF ({e}), trying PNS reader...")
-            df = _read_pns_mff(file_path)
+            df, _ = _read_pns_mff(file_path)
             return df
 
     # Standard EDF via MNE
