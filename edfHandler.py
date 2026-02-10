@@ -1,3 +1,4 @@
+import inspect
 import os
 import re
 import struct
@@ -9,6 +10,19 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import config as config
+
+
+def _read_raw_egi_kwargs(file_path: str):
+    """Kwargs for read_raw_egi that work on both old and new MNE (no TypeError)."""
+    kwargs = {
+        "preload": True,
+        "verbose": False,
+        "channel_naming": "E%d",
+    }
+    sig = inspect.signature(mne.io.read_raw_egi)
+    if "events_as_annotations" in sig.parameters:
+        kwargs["events_as_annotations"] = False  # we add events from MFF XML ourselves
+    return kwargs
 
 def _extract_pns_channel_names(mff_dir: str) :
     """
@@ -415,16 +429,18 @@ def edf_to_df(file_path: str) -> pd.DataFrame:
     is_mff = os.path.isdir(file_path) or (isinstance(file_path, str) and file_path.lower().endswith(".mff"))
     if is_mff:
         try:
-            raw = mne.io.read_raw_egi(
-                file_path,
-                preload=True,
-                verbose=False,
-                events_as_annotations=False,
-                channel_naming="E%d",  # E1, E2, ... E256
-            )
+            raw = mne.io.read_raw_egi(file_path, **_read_raw_egi_kwargs(file_path))
             df = raw.to_data_frame()
-            if "time" in df.columns and "time_stamp" not in df.columns:
-                df = df.rename(columns={"time": "time_stamp"})
+            # Ensure time_stamp column (MNE may put time in column "time" or in index)
+            if "time_stamp" not in df.columns:
+                if "time" in df.columns:
+                    df = df.rename(columns={"time": "time_stamp"})
+                else:
+                    df = df.reset_index()
+                    if "time" in df.columns:
+                        df = df.rename(columns={"time": "time_stamp"})
+                    elif "index" in df.columns and np.issubdtype(df["index"].dtype, np.floating):
+                        df = df.rename(columns={"index": "time_stamp"})
             if "event_label" not in df.columns:
                 df["event_label"] = ""
             _add_mff_events_to_df(df, file_path)
@@ -447,10 +463,10 @@ def eeg_to_df(file_path: str) -> pd.DataFrame:
 
     if ext == ".mff":
         # EGI MFF — channel_naming='E%d' gives E1, E2, ... E256
-        raw = mne.io.read_raw_egi(
-            file_path, preload=True, verbose=False, channel_naming="E%d"
-        )
-        df = raw.to_data_frame()  # includes 'time' column
+        raw = mne.io.read_raw_egi(file_path, **_read_raw_egi_kwargs(file_path))
+        df = raw.to_data_frame()
+        if "time_stamp" not in df.columns and "time" in df.columns:
+            df = df.rename(columns={"time": "time_stamp"})
         return df
 
     if ext == ".edf":
