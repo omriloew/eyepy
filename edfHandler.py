@@ -440,7 +440,13 @@ def edf_to_df(file_path: str) -> pd.DataFrame:
     is_mff = os.path.isdir(file_path) or (isinstance(file_path, str) and file_path.lower().endswith(".mff"))
     if is_mff:
         try:
-            raw = mne.io.read_raw_egi(file_path, preload=True, verbose=False, events_as_annotations=False)
+            raw = mne.io.read_raw_egi(
+                file_path,
+                preload=True,
+                verbose=False,
+                events_as_annotations=False,
+                channel_naming="E%d",  # E1, E2, ... E256
+            )
             df = raw.to_data_frame()
             if "time" in df.columns and "time_stamp" not in df.columns:
                 df = df.rename(columns={"time": "time_stamp"})
@@ -465,8 +471,10 @@ def eeg_to_df(file_path: str) -> pd.DataFrame:
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == ".mff":
-        # EGI MFF
-        raw = mne.io.read_raw_egi(file_path, preload=True, verbose=False)
+        # EGI MFF — channel_naming='E%d' gives E1, E2, ... E256
+        raw = mne.io.read_raw_egi(
+            file_path, preload=True, verbose=False, channel_naming="E%d"
+        )
         df = raw.to_data_frame()  # includes 'time' column
         return df
 
