@@ -134,7 +134,7 @@ exp_info = {
     'participant': (participent),
     'session_number': (session_number),
     'gender': ('male', 'female', 'other'),
-    'session': ('threshold', 'pain_rating' , 'main', 'cpm', 'plr', 'tense', 'tense_extinct','cpm_dual'),
+    'session': ('threshold', 'pain_rating' , 'main', 'plr', 'tense', 'tense_extinct','cpm_dual'),
     'age': '',
     'dominant eye': ('right', 'left', 'both'),
     'left-handed': False,

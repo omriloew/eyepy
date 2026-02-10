@@ -729,7 +729,7 @@ Examples:
     
     try:
         # Convert video to CSV
-        df = video_to_csv(
+        df = video_to_df(
             video_path=args.input_video,
             output_path=args.output_csv,
             fps=args.fps,

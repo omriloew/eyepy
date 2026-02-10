@@ -146,6 +146,7 @@ class DataRecordHandler:
             '_event_code': event_code,
             '_event_message': event_label,
             '_temperature': temperature,
+            '_rating': -1,
         }
         
         # Add event data if provided
