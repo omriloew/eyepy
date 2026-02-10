@@ -42,7 +42,7 @@ medoc_drift_factors = {'temperature_c': 4000}  # Drift/offset for MEDOC columns:
 #===============================================
 process_eeg = True
 eeg_file_path = 'log_files/omri2/1/threshold/PPM_TH_PILOT_20260203_113844.mff'
-keep_eeg_cols = ["E4", "E2"]  # Keep all channels - empty list means keep all. E219, E25, E26 show best blink characteristics
+keep_eeg_cols = ["E4", "E2", "EMG Leg"]  # Keep all channels - empty list means keep all. E219, E25, E26 show best blink characteristics
 eeg_scale_factors = {"E4": 10.0, "E2":5.0, "EMG Leg": 0.01}  # Multipliers for EEG columns: {'column_name': multiplier}
 eeg_drift_factors = {"E4": -109000.0, "EMG Leg": 5000.0, "E2": -147000.0}  # Drift/offset for EEG columns: {'column_name': offset_value}
 #===============================================
