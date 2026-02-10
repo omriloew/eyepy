@@ -297,8 +297,8 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
             interval_mask = (time_stamps >= interval_start) & (time_stamps <= interval_end)
             valid_mask |= interval_mask
     else:
-        # If no intervals specified, use default padding (exclude noisy start/end)
-        valid_mask[start_padding:total_frames - end_padding] = True
+        # If no intervals specified, process the entire signal (no exclusions)
+        valid_mask[:] = True
     
     # Find the first and last valid indices for statistics calculation
     valid_indices = np.where(valid_mask)[0]
@@ -394,13 +394,8 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
             if intervals_sorted[-1][1] < time_array[-1]:
                 ax1.axvspan(intervals_sorted[-1][1], time_array[-1], alpha=0.2, color='yellow')
         else:
-            # If no intervals specified, show default padding regions as ignored
-            if start_padding > 0:
-                ignore_start_time = time_array[start_padding] if start_padding < len(time_array) else time_array[0]
-                ax1.axvspan(time_array[0], ignore_start_time, alpha=0.2, color='yellow', label='Ignored (start)')
-            if end_padding > 0:
-                ignore_end_time = time_array[-end_padding] if end_padding < len(time_array) else time_array[-1]
-                ax1.axvspan(ignore_end_time, time_array[-1], alpha=0.2, color='yellow', label='Ignored (end)')
+            # If no intervals specified, process entire signal (no ignored regions to show)
+            pass
         
         # Mark LED_ON events
         if len(lights_on_events) > 0:
@@ -450,13 +445,8 @@ def extract_light_events_from_intensity(intensity_array, time_stamps, do_plot=Tr
             if intervals_sorted[-1][1] < time_array[-1]:
                 ax2.axvspan(intervals_sorted[-1][1], time_array[-1], alpha=0.2, color='yellow')
         else:
-            # Default padding regions
-            if start_padding > 0:
-                ignore_start_time = time_array[start_padding] if start_padding < len(time_array) else time_array[0]
-                ax2.axvspan(time_array[0], ignore_start_time, alpha=0.2, color='yellow')
-            if end_padding > 0:
-                ignore_end_time = time_array[-end_padding] if end_padding < len(time_array) else time_array[-1]
-                ax2.axvspan(ignore_end_time, time_array[-1], alpha=0.2, color='yellow')
+            # If no intervals specified, process entire signal (no ignored regions to show)
+            pass
         
         # Mark detected peaks in derivative
         if len(lights_on_events) > 0:

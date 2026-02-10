@@ -277,20 +277,32 @@ def _pool_events(reference_df: pd.DataFrame, device_df: pd.DataFrame) -> pd.Data
         reference_df.loc[nearest_reference_event, EVENT_COL] = f"{nearest_reference_event}; {device_event}"
     return reference_df
 
-def _pool_into_reference_df(reference_df: pd.DataFrame, device_df: pd.DataFrame, window_ms: float = 5.0) -> pd.DataFrame:
+def _pool_into_reference_df(reference_df: pd.DataFrame, device_df: pd.DataFrame, window_ms: float = 5.0, pool_events: bool = False) -> pd.DataFrame:
+    """
+    Pool data from device_df into reference_df.
+    
+    Args:
+        reference_df: Reference DataFrame to pool data into
+        device_df: Device DataFrame to pool data from
+        window_ms: Window size in milliseconds for pooling
+        pool_events: If True, pool event_label column. If False, skip events (events should only come from reference device)
+    """
     discrete_cols = _get_discrete_cols(device_df, exclude=[TIME_COL, EVENT_COL])
     numeric_cols = _get_numeric_data_cols(device_df, exclude=[TIME_COL, EVENT_COL])
     for col in discrete_cols:
         _pool_discrete_col(reference_df, device_df, col, window_ms)
     for col in numeric_cols:
         _pool_numeric_col(reference_df, device_df, col, window_ms)
-    _pool_discrete_col(reference_df, device_df, col="event_label", window_ms=window_ms)
+    
+    # Only pool events if explicitly requested (should only be True for reference device)
+    if pool_events:
+        _pool_discrete_col(reference_df, device_df, col="event_label", window_ms=window_ms)
 
     return reference_df
 
 def synchronize_to_reference(reference_name: str, devices: Dict[str, pd.DataFrame], df_E: pd.DataFrame, 
                              window_ms: float = 5.0, plot_led_events: bool = True, 
-                             plot_dir: str = None) -> Tuple[pd.DataFrame, Dict[str, Tuple[float, float]]]:
+                             plot_dir: str = None, device_time_offsets: Dict[str, float] = None) -> Tuple[pd.DataFrame, Dict[str, Tuple[float, float]]]:
     """
     Synchronize devices to a reference timeline using LED events.
     
@@ -301,10 +313,16 @@ def synchronize_to_reference(reference_name: str, devices: Dict[str, pd.DataFram
         window_ms: Window size in milliseconds for pooling
         plot_led_events: Whether to plot LED event matching for debugging
         plot_dir: Directory to save LED event plots
+        device_time_offsets: Dictionary mapping device names to time offsets in seconds.
+                           These offsets are applied AFTER affine transformation to correct
+                           for processing delays. Positive values shift data forward in time.
     
     Returns:
         Tuple of (synchronized dataframe, affine transformations dictionary)
     """
+    if device_time_offsets is None:
+        device_time_offsets = {}
+    
     affine_transformations = get_affine_mapping(reference_name=reference_name, devices=devices, df_E=df_E, 
                                                 plot=plot_led_events, plot_dir=plot_dir)
     
@@ -314,19 +332,30 @@ def synchronize_to_reference(reference_name: str, devices: Dict[str, pd.DataFram
         a_dev_to_ref, b_dev_to_ref = affine_transformations[device_name]
         device_df[TIME_COL] = a_dev_to_ref * device_df[TIME_COL] + b_dev_to_ref
         _extract_event_series(device_df)
+    
+    # Apply manual offsets
+    for device_name, device_df in devices.items():
+        if device_name == reference_name:
+            continue
+        if device_name in device_time_offsets:
+            offset = device_time_offsets[device_name]
+            if offset != 0.0:
+                device_df[TIME_COL] = device_df[TIME_COL] + offset
+                _extract_event_series(device_df)  # Re-extract after offset
 
+    # Create final synced output
     out = devices[reference_name].copy()
-
     a_E_to_ref, b_E_to_ref = affine_transformations[reference_name]
     df_E[TIME_COL] = a_E_to_ref * df_E[TIME_COL] + b_E_to_ref
 
     for device_name, device_df in devices.items():
         if device_name == reference_name:
             continue
-        _pool_into_reference_df(out, device_df, window_ms)
+        # Pool data columns but NOT events - events should only come from reference device
+        _pool_into_reference_df(out, device_df, window_ms, pool_events=False)
 
-    _pool_into_reference_df(out, df_E, window_ms)
-    _pool_discrete_col(out, df_E, col="event_label", window_ms=window_ms)
+    # Don't pool events from Events CSV - events should only come from reference device
+    # Events are already in the reference device (out), so we don't need to pool them from anywhere else
 
     return out, affine_transformations
 

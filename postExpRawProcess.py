@@ -14,45 +14,45 @@ always_keep_cols = ['time_stamp', 'event_label'] #DO NOT CHANGE THIS
 #===============================================
 # events configuration
 #===============================================
-events_csv_path = 'log_files/omer/10/plr/omer_plr_events.csv'
+events_csv_path = 'omri2/1/main/omri2_main_events.csv'
 keep_events_cols = ['_event_code']
 #===============================================
 # swir configuration
 #===============================================
 process_swir = True
-swir_csv_path = 'log_files/omer/10/plr/roi_intensity_results_PLR1.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
+swir_csv_path = 'omri2/1/main/roi_intensity_results_omri_main_simple.csv'  # Path to SWIR CSV file (should have time_sec and stat_intensity columns)
 keep_swir_cols = ['frame', 'dyn_intensity', 'dyn_darkness', 'stat_intensity', 'stat_darkness', 'roi_update']
-swir_scale_factors = {'dyn_intensity': 100, 'dyn_darkness': 100}  # Multipliers for SWIR columns: {'column_name': multiplier}
-swir_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -13500.0}  # Drift/offset for SWIR columns: {'column_name': offset_value}
+swir_scale_factors = {'dyn_intensity': 100, 'dyn_darkness': 200}  # Multipliers for SWIR columns: {'column_name': multiplier}
+swir_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -30000.0}  # Drift/offset for SWIR columns: {'column_name': offset_value}
 # LED event detection intervals: only detect events within these time ranges (in seconds)
 # Format: list of tuples [(start1, end1), (start2, end2), ...]
 # Events outside these intervals will be ignored
-swir_led_detection_intervals = [(80.0, 110.0), (220.0, 240.0)]  # Example: only detect events between 20s and 93s
-swir_led_threshold_multiplier = 3  # Threshold multiplier for LED event detection (higher = more strict)
+swir_led_detection_intervals = []  # Example: only detect events between 20s and 93s
+swir_led_threshold_multiplier = 6  # Threshold multiplier for LED event detection (higher = more strict)
 #===============================================
 # medoc configuration
 #===============================================
-process_medoc = False
-medoc_csv_path = 'log_files/omer/10/threshold/omer_threshold_medoc_events.csv'
+process_medoc = True
+medoc_csv_path = 'omri2/1/main/omri2_main_medoc_events.csv'
 keep_medoc_cols = ['temperature_c']
 medoc_scale_factors = {'temperature_c': 100.0}  # Multipliers for MEDOC columns: {'column_name': multiplier}
-medoc_drift_factors = {}  # Drift/offset for MEDOC columns: {'column_name': offset_value}
+medoc_drift_factors = {'temperature_c': 4000}  # Drift/offset for MEDOC columns: {'column_name': offset_value}
 #===============================================
 # eeg configuration
 #===============================================
 process_eeg = True
-eeg_file_path = 'log_files/omer/10/plr/PLR_1_20260115_113336.mff'
-keep_eeg_cols = []
-eeg_scale_factors = {}  # Multipliers for EEG columns: {'column_name': multiplier}
-eeg_drift_factors = {}  # Drift/offset for EEG columns: {'column_name': offset_value}
+eeg_file_path = 'PILOT/PPM_MAIN_PILOT_20260203_115754.mff'
+keep_eeg_cols = ["E4", "E2"]  # Keep all channels - empty list means keep all. E219, E25, E26 show best blink characteristics
+eeg_scale_factors = {"E4": 10.0, "E2":5.0, "EMG Leg": 0.01}  # Multipliers for EEG columns: {'column_name': multiplier}
+eeg_drift_factors = {"E4": -109000.0, "EMG Leg": 5000.0, "E2": -147000.0}  # Drift/offset for EEG columns: {'column_name': offset_value}
 #===============================================
 # eyelink configuration 
 #===============================================
 process_eyelink = True
-eyelink_file_path = 'log_files/omer/10/plr/test.edf'
-keep_eyelink_cols = ['ps']
+eyelink_file_path = 'omri2/1/main/test.edf'
+keep_eyelink_cols = ['ps'] # ps or ps_left or ps_right
 eyelink_scale_factors = {'xpos': 1.0, 'ypos': 1.0, 'ps': 1.0}  # Multipliers for Eyelink columns: {'column_name': multiplier}
-eyelink_drift_factors = {}  # Drift/offset for Eyelink columns: {'column_name': offset_value}
+eyelink_drift_factors = {"ps": 4000.0}  # Drift/offset for Eyelink columns: {'column_name': offset_value}
 #===============================================
 # output configuration
 #===============================================
@@ -61,27 +61,38 @@ output_dir = 'post_exp_raw_process_results'
 #===============================================
 # session configuration
 #===============================================
-session_type = 'th'
-participant_id = 'omer'
-session_number = '10'
+session_type = 'main'
+participant_id = 'omri2'
+session_number = '1'
 #===============================================
 # synchronization configuration
 #===============================================
 sychronize_to = 'SWIR'
+# Device-specific time offset corrections (in seconds) to account for processing delays
+# Positive values shift device data forward in time, negative values shift backward
+# These offsets are applied AFTER affine transformation but BEFORE pooling
+# If ps (EL) events appear before dyn_darkness (SWIR) events, use negative EL offset
+# Example: if ps drops 0.05s before dyn_darkness, set EL: -0.05 to align them
+device_time_offsets = {
+    'EL': 0.0,    # Eyelink offset (seconds) - negative to delay EL to match SWIR
+    'SWIR': 0.0,    # SWIR offset (seconds) - reference device, usually 0
+    'MEDOC': 0.0,   # MEDOC offset (seconds)
+    'EEG': 0.0      # EEG offset (seconds)
+}
 #===============================================
 # visualization configuration
 #===============================================
-columns_to_exclude_from_plot = ['frame_index', 'frame', 'roi_update', 'stat_darkness', 'dyn_intensity']  # Columns to exclude from final visualization
+columns_to_exclude_from_plot = ['frame_index', 'frame', 'roi_update', 'stat_darkness', 'dyn_intensity', 'stat_intensity']  # Columns to exclude from final visualization
 # Additional CSV to plot alongside synced data (optional)
 # CSV should have 'time_sec' column (will be matched to 'time_stamp' in synced data)
 additional_csv_to_plot = NONE # Set to CSV file path or None to skip
 additional_csv_multiplier = 100.0  # Multiplier to apply to all numeric columns from additional CSV
-additional_csv_drift_factors = {'dyn_intensity': -8000.0, 'dyn_darkness': -13500.0}  # Drift/offset for additional CSV columns: {'column_name': offset_value}
-additional_csv_exclude_cols = ['frame', 'roi_update', 'stat_darkness']  # Columns to exclude from additional CSV when plotting
+additional_csv_drift_factors = {}  # Drift/offset for additional CSV columns: {'column_name': offset_value}
+additional_csv_exclude_cols = []  # Columns to exclude from additional CSV when plotting
 # Example: additional_csv_to_plot = '2/4/pain_rating/roi_intensity_results_NRS4.csv'
 # Example: additional_csv_multiplier = 0.001  # Scale down by 1000
 # Example: additional_csv_exclude_cols = ['frame', 'frame_index', 'other_col']
-
+POOLING_WINDOW_MS = 30.0
 
 def configure_output_paths():
     
@@ -188,8 +199,13 @@ def get_eyelink_df(eyelink_file_path, session_output_dir=None, output_csv_sufix=
 
 def get_eeg_df(eeg_file_path):
     print("================================================")
-    cp.colored_print("== Converting EEG EDF to DataFrame ==", color=cp.Fore.CYAN)
-    df = edf.export_emg_leg_csv(eeg_file_path,output_dir + "/eeg.csv")
+    cp.colored_print("== Converting EEG EDF/MFF to DataFrame ==", color=cp.Fore.CYAN)
+    df = edf.edf_to_df(eeg_file_path)
+    # If keep_eeg_cols is empty, keep all columns (except always keep time_stamp and event_label)
+    if len(keep_eeg_cols) > 0:
+        keep_cols = always_keep_cols + keep_eeg_cols
+        df = df[keep_cols]
+    # else: keep all columns (they already include time_stamp and event_label)
     cp.colored_print(f"EEG DataFrame: {df.head()}", color=cp.Fore.BLUE)
     print("================================================")
     print(df.head())
@@ -261,6 +277,7 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, drift_factors=No
         - Columns starting with '_' are plotted as discrete (markers where values exist)
         - Other columns are plotted as continuous (lines)
         - All plots on the same graph
+        - Extreme values (>10000 or <-10000) are clipped for visualization to prevent plot distortion
     """
     if scale_factors is None:
         scale_factors = {}
@@ -363,12 +380,14 @@ def plot_df_in_time(df, columns_to_plot=[], scale_factors=None, drift_factors=No
         ax.legend(handles, labels, loc='best', fontsize=8)
     else:
         ax.legend(loc='best', fontsize=8)
-    if save_path:
-        plt.savefig(save_path)
-        print(f"Plot saved to: {save_path}")
+    
     plt.tight_layout()
     plt.show()
-
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: {save_path}")
+    else:
+        plt.show()
 
 def main():
     # Configure paths
@@ -383,6 +402,10 @@ def main():
         devices["EL"] = eyelink_df
     if process_eeg:
         eeg_df = get_eeg_df(eeg_file_path)
+        # Save EEG CSV before synchronization
+        eeg_pre_sync_path = f'{session_output_dir}/EEG_pre_sync_{output_csv_sufix}'
+        eeg_df.to_csv(eeg_pre_sync_path, index=False)
+        cp.colored_print(f"EEG (pre-sync) saved to: {eeg_pre_sync_path}", color=cp.Fore.GREEN)
         devices["EEG"] = eeg_df
     if process_medoc:
         medoc_df = get_medoc_df(medoc_csv_path)
@@ -394,9 +417,10 @@ def main():
         reference_name=sychronize_to,
         devices=devices,
         df_E=events_df,
-        window_ms=30.0,
+        window_ms=POOLING_WINDOW_MS,
         plot_led_events=True,
-        plot_dir=session_output_dir
+        plot_dir=session_output_dir,
+        device_time_offsets=device_time_offsets
     )
 
     # Save each individual device's synced DataFrame
@@ -481,6 +505,17 @@ def main():
     plot_df_in_time(synced_df, columns_to_plot=plot_cols, scale_factors=scale_factors, drift_factors=drift_factors, df_name="SYNCED COMBINED", save_path=plot_save_path)
     
     print(f"Mappings: {mappings}")
+
+
+def test():
+    medoc_df = get_medoc_df('log_files/omri/1/main/omri_main_medoc_events.csv')
+    events_df = get_events_df('log_files/omri/1/main/omri_main_events.csv')
+    plot_df_in_time(events_df,df_name="EVENTS")
+    plot_df_in_time(medoc_df, columns_to_plot=["temperature_c"], df_name="MEDOC")
+    swir_df = swir_csv_to_df(swir_csv_path=swir_csv_path)
+    plot_df_in_time(swir_df, df_name="SWIR")
+    eyelink_df = get_eyelink_df(eyelink_file_path)
+    plot_df_in_time(eyelink_df, columns_to_plot=["xpos", "ypos", "ps"], df_name="EYELINK")
     
 
 if __name__ == "__main__":
