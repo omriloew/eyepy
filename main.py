@@ -529,7 +529,7 @@ def tense_session(extinction=False):
         return
     
     low_temp = rate_temps[0]
-    high_temp = rate_temps[1]
+    high_temp = rate_temps[2]
     
     log_info(f"Tense session - Group: {tense_group} ({signal_color}), Low temp: {low_temp}, High temp: {high_temp}")
     
